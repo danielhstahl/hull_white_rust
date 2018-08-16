@@ -5,7 +5,7 @@ authors = ["Daniel Stahl <danstahl1138@gmail.com>"]
 
 [dependencies]
 nrfind = "1.0.2"
-black_scholes = "0.2.3"
+black_scholes = "0.2.6"
 
 [dev-dependencies]
 approx = "0.2.0"
