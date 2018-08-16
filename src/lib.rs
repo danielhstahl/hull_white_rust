@@ -99,7 +99,7 @@ fn variance_r(
     sigma.powi(2)*(1.0-(-2.0*a*(T-t)).exp())/(2.0*a)
 }
 
-fn get_max_double(
+fn get_max_float(
     arr:&[f64]
 )->f64{
     arr.iter().fold(0.0 as f64, |running_max, elem|{
@@ -150,22 +150,29 @@ pub fn bond_price_now(
     (-yield_curve(bond_maturity)).exp()
 }
 
-pub fn coupon_bond_price_t(
+fn coupon_bond_generic_t(
     r_t:f64,
     a:f64,
     sigma:f64,
     t:f64,
-    coupon_times:&[f64], 
+    coupon_times:&[f64], //does not include the bond_maturity, but the function does check for that
+    bond_maturity:f64,
     coupon_rate:f64,
     yield_curve:&Fn(f64)->f64,
-    forward_curve:&Fn(f64)->f64
+    forward_curve:&Fn(f64)->f64,
+    generic_fn:&Fn(f64, f64, f64, f64, f64, &Fn(f64)->f64, &Fn(f64)->f64)->f64
 )->f64{
-    let last_time=get_max_double(coupon_times);
+    let par_value=1.0; //without loss of generality
+    let final_payment=generic_fn(
+        r_t, a, sigma, t, 
+        bond_maturity, 
+        yield_curve, forward_curve
+    )*(par_value+coupon_rate); //par of one+coupon rate
     coupon_times.iter().fold(
-        bond_price_t(r_t, a, sigma, t, last_time, yield_curve, forward_curve),
+        final_payment,
         |accum, coupon_time|{
-            if *coupon_time>t {
-                accum+coupon_rate*bond_price_t(
+            if *coupon_time>t && *coupon_time<bond_maturity { //check for whether includes bond maturity
+                accum+coupon_rate*generic_fn(
                     r_t, a, sigma, t, *coupon_time, 
                     yield_curve, forward_curve
                 )
@@ -174,6 +181,56 @@ pub fn coupon_bond_price_t(
                 accum
             }
         }
+    )
+}
+fn coupon_bond_generic_now(
+    coupon_times:&[f64], //does not include the bond_maturity, but the function does check for that
+    bond_maturity:f64,
+    coupon_rate:f64,
+    yield_curve:&Fn(f64)->f64,
+    generic_fn:&Fn(f64, &Fn(f64)->f64)->f64
+)->f64{
+    let par_value=1.0; //without loss of generality
+    let final_payment=generic_fn(
+        bond_maturity, 
+        yield_curve
+    )*(par_value+coupon_rate); //par of one+coupon rate
+    coupon_times.iter().fold(
+        final_payment,
+        |accum, coupon_time|{
+            if *coupon_time<bond_maturity { //check for whether includes bond maturity
+                accum+coupon_rate*generic_fn(
+                    *coupon_time, 
+                    yield_curve
+                )
+            }
+            else {
+                accum
+            }
+        }
+    )
+}
+//par=1
+pub fn coupon_bond_price_t(
+    r_t:f64,
+    a:f64,
+    sigma:f64,
+    t:f64,
+    coupon_times:&[f64], //does not include the bond_maturity, but the function does check for that
+    bond_maturity:f64,
+    coupon_rate:f64,
+    yield_curve:&Fn(f64)->f64,
+    forward_curve:&Fn(f64)->f64
+)->f64{
+    coupon_bond_generic_t(
+        r_t, 
+        a, sigma, t, 
+        coupon_times,
+        bond_maturity,
+        coupon_rate,
+        yield_curve,
+        forward_curve,
+        &bond_price_t
     )
 }
 
@@ -182,42 +239,38 @@ fn coupon_bond_price_t_deriv(
     a:f64,
     sigma:f64,
     t:f64,
-    coupon_times:&[f64], 
+    coupon_times:&[f64], //does not include the bond_maturity, but the function does check for that
+    bond_maturity:f64,
     coupon_rate:f64,
     yield_curve:&Fn(f64)->f64,
     forward_curve:&Fn(f64)->f64
 )->f64{
-    let last_time=get_max_double(coupon_times);
-    coupon_times.iter().fold(
-        bond_price_t_deriv(r_t, a, sigma, t, last_time, yield_curve, forward_curve),
-        |accum, coupon_time|{
-            if *coupon_time>t {
-                accum+coupon_rate*bond_price_t_deriv(
-                    r_t, a, sigma, t, *coupon_time, 
-                    yield_curve, forward_curve
-                )
-            }
-            else {
-                accum
-            }
-        }
+    coupon_bond_generic_t(
+        r_t, 
+        a, sigma, t, 
+        coupon_times,
+        bond_maturity,
+        coupon_rate,
+        yield_curve,
+        forward_curve,
+        &bond_price_t_deriv
     )
 }
 
 pub fn coupon_bond_price_now(
-    coupon_times:&[f64],
-    coupon_rate:f64,
+    a:f64,
+    sigma:f64,
+    coupon_times:&[f64], //does not include the bond_maturity, but the function does check for that
+    bond_maturity:f64,
+    coupon_rate:f64, 
     yield_curve:&Fn(f64)->f64
 )->f64{
-    let last_time=get_max_double(coupon_times);
-    coupon_times.iter().fold(
-        bond_price_now(last_time, yield_curve),
-        |accum, coupon_time|{
-            accum+coupon_rate*bond_price_now(
-                *coupon_time, 
-                yield_curve
-            )
-        }
+    coupon_bond_generic_now(
+        coupon_times, 
+        coupon_rate,
+        bond_maturity,
+        yield_curve,
+        &bond_price_now
     )
 }
 
@@ -248,11 +301,90 @@ pub fn bond_call_now(
     strike:f64,
     yield_curve:&Fn(f64)->f64
 )->f64{
+    let t=0.0;//since "now"
     black_scholes::call_discount(
         bond_price_now(bond_maturity, yield_curve), //underlying
         strike,
         bond_price_now(option_maturity, yield_curve), //discount
-        t_forward_bond_vol(a, sigma, 0.0, option_maturity, bond_maturity) //volatility with maturity
+        t_forward_bond_vol(a, sigma, t, option_maturity, bond_maturity) //volatility with maturity
+    )
+}
+
+fn coupon_bond_option_generic_t(
+    r_t:f64,
+    a:f64,
+    sigma:f64,
+    t:f64,
+    option_maturity:f64,
+    coupon_times:&[f64], //does not include final payment (bond maturity)
+    bond_maturity:f64,
+    coupon_rate:f64,
+    strike:f64,
+    yield_curve:&Fn(f64)->f64,
+    forward_curve:&Fn(f64)->f64,
+    generic_fn:&Fn(
+        f64, f64, f64, 
+        f64, f64, f64, 
+        f64, &Fn(f64)->f64, &Fn(f64)->f64
+    )->f64
+)->f64{
+    let par_value=1.0;
+    //let last_time=get_max_float(coupon_times);
+    let fn_to_optimize=|r|{
+        coupon_bond_price_t(
+            r, a, sigma, t, 
+            coupon_times, 
+            bond_maturity,
+            coupon_rate, 
+            yield_curve, forward_curve
+        )-strike
+    };
+    let fn_derv=|r|{
+        coupon_bond_price_t_deriv(
+            r, a, sigma, t, 
+            coupon_times, 
+            bond_maturity,
+            coupon_rate, 
+            yield_curve, forward_curve
+        )
+    };
+    let r_optimal=nrfind::find_root(
+        &fn_to_optimize, &fn_derv, 
+        R_INIT, PREC_1, MAX_ITER
+    ).expect("Requires convergence of optimal r");
+    let final_payment=generic_fn(
+        r_t, a, sigma, t, option_maturity, 
+        bond_maturity, 
+        bond_price_t( //DO I NEED TO ADD THIS AS WELL?
+            r_optimal,
+            a, sigma, option_maturity,
+            bond_maturity,
+            yield_curve,
+            forward_curve
+        ),
+        yield_curve, forward_curve
+    )*(par_value+coupon_rate); //par of one+coupon rate
+    coupon_times.iter().fold(
+        final_payment,
+        |accum, coupon_time|{
+            if *coupon_time>t && *coupon_time<bond_maturity  {
+                accum+coupon_rate*generic_fn(
+                    r_t, a, sigma, t, option_maturity, 
+                    *coupon_time, 
+                    bond_price_t( //DO I NEED TO ADD THIS AS WELL
+                        r_optimal,
+                        a, sigma, option_maturity,
+                        *coupon_time,
+                        yield_curve,
+                        forward_curve
+                    ),
+                    yield_curve, forward_curve
+                )
+            }
+            else {
+                accum
+            }
+        }
     )
 }
 
@@ -262,47 +394,22 @@ pub fn coupon_bond_call_t(
     sigma:f64,
     t:f64,
     option_maturity:f64,
-    coupon_times:&[f64],
+    coupon_times:&[f64], //does not include final payment (bond maturity)
+    bond_maturity:f64,
     coupon_rate:f64,
     strike:f64,
     yield_curve:&Fn(f64)->f64,
     forward_curve:&Fn(f64)->f64
 )->f64{
-    let last_time=get_max_double(coupon_times);
-    let fn_to_optimize=|r|{
-        coupon_bond_price_t(r, a, sigma, t, coupon_times, coupon_rate, yield_curve, forward_curve)-strike
-    };
-    let fn_derv=|r|{
-        coupon_bond_price_t_deriv(r, a, sigma, t, coupon_times, coupon_rate, yield_curve, forward_curve)
-    };
-    let r_optimal=nrfind::find_root(&fn_to_optimize, &fn_derv, R_INIT, PREC_1, MAX_ITER).expect("Requires convergence of optimal r");
-    coupon_times.iter().fold(
-        bond_call_t(
-            r_t, a, sigma, t, option_maturity, 
-            last_time, 
-            bond_price_t(
-                r_optimal,
-                a, sigma, option_maturity,
-                last_time,
-                yield_curve,
-                forward_curve
-            ),
-            yield_curve, forward_curve
-        ),
-        |accum, coupon_time|{
-            accum+coupon_rate*bond_call_t(
-                r_t, a, sigma, t, option_maturity, 
-                *coupon_time, 
-                bond_price_t(
-                    r_optimal,
-                    a, sigma, option_maturity,
-                    *coupon_time,
-                    yield_curve,
-                    forward_curve
-                ),
-                yield_curve, forward_curve
-            )
-        }
+    coupon_bond_option_generic_t(
+        r_t, a, sigma,
+        t, option_maturity,
+        coupon_times,
+        bond_maturity,
+        coupon_rate, strike,
+        yield_curve, 
+        forward_curve,
+        &bond_call_t
     )
 }
 
@@ -348,46 +455,21 @@ pub fn coupon_bond_put_t(
     t:f64,
     option_maturity:f64,
     coupon_times:&[f64],
+    bond_maturity:f64,
     coupon_rate:f64,
     strike:f64,
     yield_curve:&Fn(f64)->f64,
     forward_curve:&Fn(f64)->f64
 )->f64{
-    let last_time=get_max_double(coupon_times);
-    let fn_to_optimize=|r|{
-        coupon_bond_price_t(r, a, sigma, t, coupon_times, coupon_rate, yield_curve, forward_curve)-strike
-    };
-    let fn_derv=|r|{
-        coupon_bond_price_t_deriv(r, a, sigma, t, coupon_times, coupon_rate, yield_curve, forward_curve)
-    };
-    let r_optimal=nrfind::find_root(&fn_to_optimize, &fn_derv, R_INIT, PREC_1, MAX_ITER).expect("Requires convergence of optimal r");
-    coupon_times.iter().fold(
-        bond_put_t(
-            r_t, a, sigma, t, option_maturity, 
-            last_time, 
-            bond_price_t(
-                r_optimal,
-                a, sigma, option_maturity,
-                last_time,
-                yield_curve,
-                forward_curve
-            ),
-            yield_curve, forward_curve
-        ),
-        |accum, coupon_time|{
-            coupon_rate*bond_put_t(
-                r_t, a, sigma, t, option_maturity, 
-                *coupon_time, 
-                bond_price_t(
-                    r_optimal,
-                    a, sigma, option_maturity,
-                    *coupon_time,
-                    yield_curve,
-                    forward_curve
-                ),
-                yield_curve, forward_curve
-            )
-        }
+    coupon_bond_option_generic_t(
+        r_t, a, sigma,
+        t, option_maturity,
+        coupon_times,
+        bond_maturity,
+        coupon_rate, strike,
+        yield_curve, 
+        forward_curve,
+        &bond_put_t
     )
 }
 
@@ -449,22 +531,7 @@ fn get_num_payments(
     (maturity-t)/delta+1.0
 }
 
-pub fn swap_rate_t(
-    r_t:f64,
-    a:f64,
-    sigma:f64,
-    t:f64,
-    swap_maturity:f64,
-    delta:f64, //tenor of simple yield
-    yield_curve:&Fn(f64)->f64,
-    forward_curve:&Fn(f64)->f64
-)->f64{
-    let num_payments=get_num_payments(t, swap_maturity, delta) as usize; //this should be an integer!  remember, T-t is the total swap length
-    let denominator_swap=(1..(num_payments+1)).fold(0.0, |accum, curr|{
-        accum+bond_price_t(r_t, a, sigma, t, t+delta*(curr as f64), yield_curve, forward_curve)
-    });
-    (1.0-bond_price_t(r_t, a, sigma, t, swap_maturity+delta, yield_curve, forward_curve))/denominator_swap
-} 
+
 
 pub fn forward_swap_rate_t(
     r_t:f64,
@@ -479,9 +546,28 @@ pub fn forward_swap_rate_t(
 )->f64{
     let num_payments=get_num_payments(t, swap_maturity, delta) as usize; //this should be an integer!  remember, T-t is the total swap length
     let denominator_swap=(1..(num_payments+1)).fold(0.0, |accum, curr|{
-        accum+bond_price_t(r_t, a, sigma, t, t+delta*(curr as f64), yield_curve, forward_curve)
+        accum+bond_price_t(r_t, a, sigma, t, swap_maturity+delta*(curr as f64), yield_curve, forward_curve)
     });
     (bond_price_t(r_t, a, sigma, t, swap_initiation, yield_curve, forward_curve)-bond_price_t(r_t, a, sigma, t, swap_maturity+delta, yield_curve, forward_curve))/denominator_swap
+} 
+pub fn swap_rate_t(
+    r_t:f64,
+    a:f64,
+    sigma:f64,
+    t:f64,
+    swap_maturity:f64,
+    delta:f64, //tenor of simple yield
+    yield_curve:&Fn(f64)->f64,
+    forward_curve:&Fn(f64)->f64
+)->f64{
+    forward_swap_rate_t(
+        r_t, a, sigma,
+        t, t, //swap is a forward swap starting at time "0" (t-t=0)
+        swap_maturity,
+        delta, 
+        yield_curve,
+        forward_curve
+    )
 } 
 
 pub fn swap_price_t(
@@ -505,6 +591,15 @@ pub fn swap_price_t(
 
 }
 
+fn get_coupon_times(
+    num_payments:usize,
+    t:f64,
+    delta:f64
+)->Vec<f64>{
+    (1..(num_payments)).map(|index|{
+        t+(index as f64)*delta
+    }).collect()
+}
 pub fn payer_swaption_t(
     r_t:f64,
     a:f64,
@@ -518,14 +613,13 @@ pub fn payer_swaption_t(
     forward_curve:&Fn(f64)->f64
 )->f64{
     let num_payments=get_num_payments(t, swap_tenor, delta) as usize;
-    let coupon_times:Vec<f64>=(1..(num_payments+1)).map(|index|{
-        option_maturity+(index as f64)*delta
-    }).collect();
+    let coupon_times=get_coupon_times(num_payments, option_maturity, delta);
     let strike=1.0;
     coupon_bond_put_t(
         r_t, a, sigma, t, 
         option_maturity, 
-        &coupon_times, 
+        &coupon_times,
+        t+(num_payments as f64)*delta,
         swap_rate*delta, 
         strike, yield_curve, 
         forward_curve
@@ -545,14 +639,13 @@ pub fn receiver_swaption_t(
     forward_curve:&Fn(f64)->f64
 )->f64{
     let num_payments=get_num_payments(t, swap_tenor, delta) as usize;
-    let coupon_times:Vec<f64>=(1..(num_payments+1)).map(|index|{
-        option_maturity+(index as f64)*delta
-    }).collect();
+    let coupon_times=get_coupon_times(num_payments, option_maturity, delta);
     let strike=1.0;
-    coupon_bond_call_t(
+    coupon_bond_put_t(
         r_t, a, sigma, t, 
         option_maturity, 
         &coupon_times, 
+        t+(num_payments as f64)*delta,
         swap_rate*delta, 
         strike, yield_curve, 
         forward_curve
@@ -574,26 +667,26 @@ fn american_swaption(
     yield_curve:&Fn(f64)->f64,
     forward_curve:&Fn(f64)->f64
 )->f64{
-    let alpha_div_sigma=|_t1:f64, curr_val:f64, _dt:f64, _j:usize| -(a*curr_val)/sigma;
-    let sigma_prime=|_t1:f64, _curr_val:f64, _dt:f64, _j:usize| 0.0;
-    let sigma_inv=|_t1:f64, y:f64, _dt:f64, _j:usize| sigma*y;
-    let check_step=|step:i32, j:i32, t1:f64, phi_at_t:f64| if step!=j { phi_t(a, sigma, t1, forward_curve) } else { phi_at_t };
-    let mut tree_step:i32=-1;
+    let alpha_div_sigma=|_t_step:f64, curr_val:f64, _dt:f64, _width:usize| -(a*curr_val)/sigma;
+    let sigma_prime=|_t_step:f64, _curr_val:f64, _dt:f64, _j:usize| 0.0;
+    let sigma_inv=|_t_step:f64, y:f64, _dt:f64, _j:usize| sigma*y;
+    let check_step=|step:usize, j:usize, t1:f64, phi_at_t:f64| if step!=j  { phi_t(a, sigma, t1, forward_curve) } else { phi_at_t };
+    let mut tree_step:usize=0;
     let mut phi_at_t=0.0;
-    let payoff=|t1:f64, curr_val:f64, _dt:f64, _j:usize| {
-        let t1_a=t1+t;
-        phi_at_t=check_step(tree_step, j, t1_a, phi_at_t);
+    let payoff=|t_step:f64, curr_val:f64, _dt:f64, j:usize| {
+        let t_a=t_step+t;
+        phi_at_t=check_step(tree_step, j, t_a, phi_at_t);
         tree_step=j;
         let swp=swap_price_t(
-            curr_Val+phi_at_t, 
-            a, sigma, t1, 
-            swap_tenor+t1, delta, 
+            curr_val+phi_at_t, 
+            a, sigma, t_step, 
+            swap_tenor+t_step, delta, 
             swap_rate, yield_curve, 
             forward_curve
         );
         //let 
         //if is_payer {
-        if swp>0{
+        if swp>0.0{
             swp
         }
         else {
@@ -603,20 +696,20 @@ fn american_swaption(
 
         }*/
     };
-    let discount=|t1:f64, curr_val:f64, _dt:f64, _j:usize| {
+    let discount=|t1:f64, curr_val:f64, dt:f64, j:usize| {
         phi_at_t=check_step(tree_step, j, t+t1, phi_at_t);
         tree_step=j;
         (-(curr_val+phi_at_t)*dt).exp()
     };
-    binomial_tree::compute_price_raw(
+    binomial_tree::compute_price_american(
         &alpha_div_sigma,
         &sigma_prime,
         &sigma_inv,
         &payoff,
         &discount,
-        (r_t-phi_t(a, sigma, t, forward_curve))/sigma,
-        num_steps,
-        option_maturity-t
+        (r_t-phi_t(a, sigma, t, forward_curve))/sigma, //initial "y"
+        option_maturity-t,
+        num_steps
     )
 }
 
