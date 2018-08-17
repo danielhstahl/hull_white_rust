@@ -25,7 +25,6 @@ extern crate approx;
  * */
 
 const PREC_1:f64=0.0000001;
-const PREC_2:f64=0.0000001;
 const R_INIT:f64=0.03;
 const MAX_ITER:i32=50;
 
@@ -35,22 +34,22 @@ fn a_t(a:f64, t_diff:f64)->f64{
 }
 
 //t is first future time
-//T is second future time
-fn at_t(a:f64, t:f64, T:f64)->f64{
-    a_t(a, T-t)
+//t_m is second future time
+fn at_t(a:f64, t:f64, t_m:f64)->f64{
+    a_t(a, t_m-t)
 }
 
 fn ct_t(
     a:f64,
     sigma:f64,
     t:f64,
-    T:f64,
+    t_m:f64,
     yield_curve:&Fn(f64)->f64,
     forward_curve:&Fn(f64)->f64
 )->f64 {
-    let sqr=(-a*T).exp()-(-a*t).exp();
-    yield_curve(t)-yield_curve(T)
-    +forward_curve(t)*at_t(a, t, T)
+    let sqr=(-a*t_m).exp()-(-a*t).exp();
+    yield_curve(t)-yield_curve(t_m)
+    +forward_curve(t)*at_t(a, t, t_m)
     -(sigma*sqr).powi(2)
     *((2.0*a*t).exp()-1.0)/(4.0*a.powi(3))
 }
@@ -59,35 +58,35 @@ fn t_forward_bond_vol(
     a:f64,
     sigma:f64,
     t:f64,
-    T:f64,
-    T_M:f64
+    t_m:f64,
+    t_f:f64
 )->f64{
-    let exp_d=1.0-(-a*(T_M-T)).exp();
-    let exp_t=1.0-(-2.0*a*(T-t)).exp();
+    let exp_d=1.0-(-a*(t_f-t_m)).exp();
+    let exp_t=1.0-(-2.0*a*(t_m-t)).exp();
     sigma*(exp_t/(2.0*a.powi(3)).sqrt())*exp_d
 }
 
 fn phi_t(
     a:f64,
     sigma:f64,
-    T:f64,
+    t:f64,
     forward_curve:&Fn(f64)->f64
 )->f64{
-    let exp_T=1.0-(-a*T).exp();
-    forward_curve(T)+(sigma*exp_T).powi(2)/(2.0*a.powi(2))
+    let exp_t=1.0-(-a*t).exp();
+    forward_curve(t)+(sigma*exp_t).powi(2)/(2.0*a.powi(2))
 }
-
+/*
 fn mu_r(
     r_t:f64,
     a:f64,
     sigma:f64,
     t:f64,
-    T:f64,
+    t_m:f64,
     forward_curve:&Fn(f64)->f64
 )->f64{
-    phi_t(a, sigma, T, forward_curve)+(r_t-phi_t(
+    phi_t(a, sigma, t_m, forward_curve)+(r_t-phi_t(
         a, sigma, t, forward_curve
-    ))*(-a*(T-t).exp())
+    ))*(-a*(t_m-t).exp())
 }
 
 fn variance_r(
@@ -110,7 +109,7 @@ fn get_max_float(
             running_max
         }
     })
-}
+}*/
 
 pub fn bond_price_t(
     r_t:f64,
@@ -258,8 +257,6 @@ fn coupon_bond_price_t_deriv(
 }
 
 pub fn coupon_bond_price_now(
-    a:f64,
-    sigma:f64,
     coupon_times:&[f64], //does not include the bond_maturity, but the function does check for that
     bond_maturity:f64,
     coupon_rate:f64, 
@@ -544,10 +541,10 @@ pub fn forward_swap_rate_t(
     yield_curve:&Fn(f64)->f64,
     forward_curve:&Fn(f64)->f64
 )->f64{
-    let num_payments=get_num_payments(t, swap_maturity, delta) as usize; //this should be an integer!  remember, T-t is the total swap length
+    let num_payments=get_num_payments(swap_initiation, swap_maturity, delta) as usize; //this should be an integer!  remember, T-t is the total swap length
     let denominator_swap=(1..(num_payments+1)).fold(0.0, |accum, curr|{
-        accum+bond_price_t(r_t, a, sigma, t, swap_maturity+delta*(curr as f64), yield_curve, forward_curve)
-    });
+        accum+bond_price_t(r_t, a, sigma, t, swap_initiation+delta*(curr as f64), yield_curve, forward_curve)
+    })*delta;
     (bond_price_t(r_t, a, sigma, t, swap_initiation, yield_curve, forward_curve)-bond_price_t(r_t, a, sigma, t, swap_maturity+delta, yield_curve, forward_curve))/denominator_swap
 } 
 pub fn swap_rate_t(
@@ -587,20 +584,34 @@ pub fn swap_price_t(
     let sm_bond=(1..num_payments).fold(0.0, |accum, curr|{
         accum+bond_price_t(r_t, a, sigma, t, first_exchange_date+delta*(curr as f64), yield_curve, forward_curve)*swap_rate*delta
     });
-    bond_price_t(r_t, a, sigma, t, first_exchange_date, yield_curve, forward_curve)-sm_bond-(1.0+swap_rate*delta)*bond_price_t(r_t, a, sigma, t, first_exchange_date+delta*num_payments_fl, yield_curve, forward_curve)
-
+    bond_price_t(
+        r_t, a, sigma, t, 
+        first_exchange_date, 
+        yield_curve, forward_curve
+    )-sm_bond-(1.0+swap_rate*delta)*bond_price_t(
+        r_t, a, sigma, t,
+        first_exchange_date+delta*num_payments_fl, 
+        yield_curve, forward_curve
+    )
 }
 
+fn get_time_from_t_index(
+    index:usize,
+    t:f64,
+    delta:f64
+)->f64{
+    t+(index as f64)*delta
+}
 fn get_coupon_times(
     num_payments:usize,
     t:f64,
     delta:f64
 )->Vec<f64>{
     (1..(num_payments)).map(|index|{
-        t+(index as f64)*delta
+        get_time_from_t_index(index, t, delta)
     }).collect()
 }
-pub fn payer_swaption_t(
+pub fn european_payer_swaption_t(
     r_t:f64,
     a:f64,
     sigma:f64,
@@ -619,14 +630,14 @@ pub fn payer_swaption_t(
         r_t, a, sigma, t, 
         option_maturity, 
         &coupon_times,
-        t+(num_payments as f64)*delta,
+        get_time_from_t_index(num_payments, t, delta),
         swap_rate*delta, 
         strike, yield_curve, 
         forward_curve
     ) //swaption is equal to put on coupon bond with coupon=swaption swapRate*delta and strike 1.
 }
 
-pub fn receiver_swaption_t(
+pub fn european_receiver_swaption_t(
     r_t:f64,
     a:f64,
     sigma:f64,
@@ -645,13 +656,33 @@ pub fn receiver_swaption_t(
         r_t, a, sigma, t, 
         option_maturity, 
         &coupon_times, 
-        t+(num_payments as f64)*delta,
+        get_time_from_t_index(num_payments, t, delta),
         swap_rate*delta, 
         strike, yield_curve, 
         forward_curve
     ) //swaption is equal to call on coupon bond with coupon=swaption swapRate*delta and strike 1.
 }
 
+
+fn max_or_zero(
+    v:f64
+)->f64{
+    if v>0.0{
+        v
+    }
+    else{
+        0.0
+    }
+}
+fn payoff_swaption(
+    is_payer:bool,
+    swp:f64
+)->f64{
+    match is_payer {
+        true=>max_or_zero(swp),
+        false=>max_or_zero(-swp)
+    }
+}
 
 fn american_swaption(
     r_t:f64,
@@ -670,36 +701,20 @@ fn american_swaption(
     let alpha_div_sigma=|_t_step:f64, curr_val:f64, _dt:f64, _width:usize| -(a*curr_val)/sigma;
     let sigma_prime=|_t_step:f64, _curr_val:f64, _dt:f64, _j:usize| 0.0;
     let sigma_inv=|_t_step:f64, y:f64, _dt:f64, _j:usize| sigma*y;
-    let check_step=|step:usize, j:usize, t1:f64, phi_at_t:f64| if step!=j  { phi_t(a, sigma, t1, forward_curve) } else { phi_at_t };
-    let mut tree_step:usize=0;
-    let mut phi_at_t=0.0;
-    let payoff=|t_step:f64, curr_val:f64, _dt:f64, j:usize| {
-        let t_a=t_step+t;
-        phi_at_t=check_step(tree_step, j, t_a, phi_at_t);
-        tree_step=j;
+    let phi_cache:Vec<f64>=binomial_tree::get_all_t(option_maturity-t, num_steps).map(|t_a|phi_t(a, sigma, t_a, forward_curve)).collect();
+    let payoff=|t_step:f64, curr_val:f64, _dt:f64, j:usize| {      
         let swp=swap_price_t(
-            curr_val+phi_at_t, 
+            curr_val+phi_cache[j], 
             a, sigma, t_step, 
             swap_tenor+t_step, delta, 
             swap_rate, yield_curve, 
             forward_curve
         );
-        //let 
-        //if is_payer {
-        if swp>0.0{
-            swp
-        }
-        else {
-            0.0
-        }
-       /* }else{
+        payoff_swaption(is_payer, swp)
 
-        }*/
     };
-    let discount=|t1:f64, curr_val:f64, dt:f64, j:usize| {
-        phi_at_t=check_step(tree_step, j, t+t1, phi_at_t);
-        tree_step=j;
-        (-(curr_val+phi_at_t)*dt).exp()
+    let discount=|_t_step:f64, curr_val:f64, dt:f64, j:usize| {
+        (-(curr_val+phi_cache[j])*dt).exp()
     };
     binomial_tree::compute_price_american(
         &alpha_div_sigma,
@@ -713,11 +728,226 @@ fn american_swaption(
     )
 }
 
+pub fn american_payer_swaption_t(
+    r_t:f64,
+    a:f64,
+    sigma:f64,
+    t:f64,
+    swap_tenor:f64,
+    option_maturity:f64,
+    delta:f64, //tenor of simple yield
+    swap_rate:f64,
+    num_steps:usize,
+    yield_curve:&Fn(f64)->f64,
+    forward_curve:&Fn(f64)->f64
+)->f64{
+    let is_payer=true;
+    american_swaption(
+        r_t, a, sigma, t, swap_tenor,
+        option_maturity, delta, 
+        swap_rate, is_payer, num_steps, 
+        yield_curve, forward_curve
+    )
+}
+
+pub fn american_receiver_swaption_t(
+    r_t:f64,
+    a:f64,
+    sigma:f64,
+    t:f64,
+    swap_tenor:f64,
+    option_maturity:f64,
+    delta:f64, //tenor of simple yield
+    swap_rate:f64,
+    num_steps:usize,
+    yield_curve:&Fn(f64)->f64,
+    forward_curve:&Fn(f64)->f64
+)->f64{
+    let is_payer=false;
+    american_swaption(
+        r_t, a, sigma, t, swap_tenor,
+        option_maturity, delta, 
+        swap_rate, is_payer, num_steps, 
+        yield_curve, forward_curve
+    )
+}
+#[cfg(test)]
+fn european_swaption_tree(
+    r_t:f64,
+    a:f64,
+    sigma:f64,
+    t:f64,
+    swap_tenor:f64,
+    option_maturity:f64,
+    delta:f64, //tenor of simple yield
+    swap_rate:f64,
+    is_payer:bool,
+    num_steps:usize,
+    yield_curve:&Fn(f64)->f64,
+    forward_curve:&Fn(f64)->f64
+)->f64{
+    let alpha_div_sigma=|_t_step:f64, curr_val:f64, _dt:f64, _width:usize| -(a*curr_val)/sigma;
+    let sigma_prime=|_t_step:f64, _curr_val:f64, _dt:f64, _j:usize| 0.0;
+    let sigma_inv=|_t_step:f64, y:f64, _dt:f64, _j:usize| sigma*y;
+    let phi_cache:Vec<f64>=binomial_tree::get_all_t(option_maturity-t, num_steps).map(|t_a|phi_t(a, sigma, t_a, forward_curve)).collect();
+    let payoff=|t_step:f64, curr_val:f64, _dt:f64, j:usize| {
+        let swp=swap_price_t(
+            curr_val+phi_cache[j], 
+            a, sigma, t_step, 
+            swap_tenor+t_step, delta, 
+            swap_rate, yield_curve, 
+            forward_curve
+        );
+        payoff_swaption(is_payer, swp)
+    };
+    let discount=|_t_a:f64, curr_val:f64, dt:f64, j:usize| {
+        (-(curr_val+phi_cache[j])*dt).exp()
+    };
+    binomial_tree::compute_price_raw(
+        &alpha_div_sigma,
+        &sigma_prime,
+        &sigma_inv,
+        &payoff,
+        &discount,
+        (r_t-phi_t(a, sigma, t, forward_curve))/sigma, //initial "y"
+        option_maturity-t,
+        num_steps,
+        false
+    )
+}
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_bond_price() {
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        //let delta=0.25;
+        //let strike=0.04;
+        let future_time=0.5;
+        //let swap_maturity=5.5;
+        let option_maturity=1.5;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        assert_eq!(
+            bond_price_t(curr_rate, a, sig, future_time, option_maturity, &yield_curve, &forward_curve), 
+            bond_price_now(option_maturity-future_time, &yield_curve)
+        );
+    }
+    #[test]
+    fn test_bond_price_at_expiry() {
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        //let delta=0.25;
+        //let strike=0.04;
+        let future_time=0.5;
+        //let swap_maturity=5.5;
+        //let option_maturity=1.5;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        assert_eq!(
+            bond_price_t(curr_rate, a, sig, future_time, future_time, &yield_curve, &forward_curve), 
+            1.0
+        );
+    }
+    #[test]
+    fn test_swap(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let delta=0.25;
+       // let strike=0.04;
+        let future_time=0.5;
+        let swap_maturity=5.5;
+        //let option_maturity=1.5;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+
+        assert_abs_diff_eq!(
+            swap_price_t(
+                curr_rate, a, sig, future_time, 
+                swap_maturity, delta, 
+                swap_rate_t(
+                    curr_rate, a, sig, future_time, 
+                    swap_maturity, 
+                    delta, 
+                    &yield_curve, &forward_curve
+                ),
+                &yield_curve, &forward_curve
+            ), 
+            0.0,
+            epsilon=0.000000001
+        );
+    }
+    #[test]
+    fn payer_swaption(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let delta=0.25;
+        //let strike=0.04;
+        let future_time=0.0;
+        let swap_tenor=5.0;
+        let option_maturity=1.0;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let swap_rate=forward_swap_rate_t(
+            curr_rate, a, sig, 
+            future_time, option_maturity, 
+            swap_tenor+option_maturity, 
+            delta, &yield_curve, 
+            &forward_curve
+        );
+        let analytical=european_payer_swaption_t(
+            curr_rate, a, sig, swap_rate,
+            future_time, swap_tenor, 
+            option_maturity, delta, 
+            &yield_curve, &forward_curve
+        );
+        let is_payer=true;
+        let tree=european_swaption_tree(
+            curr_rate, a, sig, swap_rate,
+            future_time, swap_tenor, 
+            option_maturity, delta, 
+            is_payer, 5000,
+            &yield_curve, &forward_curve
+        );
+        assert_abs_diff_eq!(
+            analytical,
+            tree,
+            epsilon=0.000001
+        )
     }
 }
