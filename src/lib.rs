@@ -54,6 +54,7 @@ fn ct_t(
     *((2.0*a*t).exp()-1.0)/(4.0*a.powi(3))
 }
 
+//t_forward_bond_vol(a, sigma, t, option_maturity, bond_maturity) 
 fn t_forward_bond_vol(
     a:f64,
     sigma:f64,
@@ -63,7 +64,7 @@ fn t_forward_bond_vol(
 )->f64{
     let exp_d=1.0-(-a*(t_f-t_m)).exp();
     let exp_t=1.0-(-2.0*a*(t_m-t)).exp();
-    sigma*(exp_t/(2.0*a.powi(3)).sqrt())*exp_d
+    sigma*(exp_t/(2.0*a.powi(3))).sqrt()*exp_d
 }
 
 fn phi_t(
@@ -307,7 +308,7 @@ pub fn bond_call_now(
         t_forward_bond_vol(a, sigma, t, option_maturity, bond_maturity) //volatility with maturity
     )
 }
-
+/*The price of a call option on coupon bond under Hull White...uses jamshidian's trick*/
 fn coupon_bond_option_generic_t(
     r_t:f64,
     a:f64,
@@ -325,12 +326,12 @@ fn coupon_bond_option_generic_t(
         f64, f64, f64, 
         f64, &Fn(f64)->f64, &Fn(f64)->f64
     )->f64
-)->f64{
+)->f64{ 
     let par_value=1.0;
-    //let last_time=get_max_float(coupon_times);
     let fn_to_optimize=|r|{
         coupon_bond_price_t(
-            r, a, sigma, t, 
+            r, a, sigma, 
+            option_maturity, 
             coupon_times, 
             bond_maturity,
             coupon_rate, 
@@ -339,7 +340,8 @@ fn coupon_bond_option_generic_t(
     };
     let fn_derv=|r|{
         coupon_bond_price_t_deriv(
-            r, a, sigma, t, 
+            r, a, sigma, 
+            option_maturity, 
             coupon_times, 
             bond_maturity,
             coupon_rate, 
@@ -452,7 +454,7 @@ pub fn coupon_bond_put_t(
     sigma:f64,
     t:f64,
     option_maturity:f64,
-    coupon_times:&[f64],
+    coupon_times:&[f64], //these should be greater than the option maturity
     bond_maturity:f64,
     coupon_rate:f64,
     strike:f64,
@@ -612,6 +614,7 @@ fn get_coupon_times(
         get_time_from_t_index(index, t, delta)
     }).collect()
 }
+
 pub fn european_payer_swaption_t(
     r_t:f64,
     a:f64,
@@ -627,12 +630,11 @@ pub fn european_payer_swaption_t(
     let num_payments=get_num_payments(t, swap_tenor, delta) as usize;
     let coupon_times=get_coupon_times(num_payments, option_maturity, delta);
     let strike=1.0;
-    coupon_times.iter().for_each(|v|println!("this is v: {}", v));
     coupon_bond_put_t(
         r_t, a, sigma, t, 
         option_maturity, 
         &coupon_times,
-        get_time_from_t_index(num_payments, t, delta),
+        get_time_from_t_index(num_payments, option_maturity, delta),
         swap_rate*delta, 
         strike, yield_curve, 
         forward_curve
@@ -654,12 +656,11 @@ pub fn european_receiver_swaption_t(
     let num_payments=get_num_payments(t, swap_tenor, delta) as usize;
     let coupon_times=get_coupon_times(num_payments, option_maturity, delta);
     let strike=1.0;
-    coupon_times.iter().for_each(|v|println!("this is v: {}", v));
     coupon_bond_call_t(
         r_t, a, sigma, t, 
         option_maturity, 
         &coupon_times, 
-        get_time_from_t_index(num_payments, t, delta),
+        get_time_from_t_index(num_payments, option_maturity, delta),
         swap_rate*delta, 
         strike, yield_curve, 
         forward_curve
@@ -704,7 +705,11 @@ fn american_swaption(
     let alpha_div_sigma=|_t_step:f64, curr_val:f64, _dt:f64, _width:usize| -(a*curr_val)/sigma;
     let sigma_prime=|_t_step:f64, _curr_val:f64, _dt:f64, _j:usize| 0.0;
     let sigma_inv=|_t_step:f64, y:f64, _dt:f64, _j:usize| sigma*y;
-    let phi_cache:Vec<f64>=binomial_tree::get_all_t(option_maturity-t, num_steps).map(|t_a|phi_t(a, sigma, t_a, forward_curve)).collect();
+    let t_of_option=option_maturity-t;
+    let mut phi_cache:Vec<f64>=binomial_tree::get_all_t(t_of_option, num_steps).map(|t_a|phi_t(a, sigma, t_a, forward_curve)).collect();
+    phi_cache.push(
+        phi_t(a, sigma, t_of_option, forward_curve)
+    );
     let payoff=|t_step:f64, curr_val:f64, _dt:f64, j:usize| {      
         let swp=swap_price_t(
             curr_val+phi_cache[j], 
@@ -726,7 +731,7 @@ fn american_swaption(
         &payoff,
         &discount,
         (r_t-phi_t(a, sigma, t, forward_curve))/sigma, //initial "y"
-        option_maturity-t,
+        t_of_option,
         num_steps
     )
 }
@@ -792,7 +797,13 @@ fn european_swaption_tree(
     let alpha_div_sigma=|_t_step:f64, curr_val:f64, _dt:f64, _width:usize| -(a*curr_val)/sigma;
     let sigma_prime=|_t_step:f64, _curr_val:f64, _dt:f64, _j:usize| 0.0;
     let sigma_inv=|_t_step:f64, y:f64, _dt:f64, _j:usize| sigma*y;
-    let phi_cache:Vec<f64>=binomial_tree::get_all_t(option_maturity-t, num_steps).map(|t_a|phi_t(a, sigma, t_a, forward_curve)).collect();
+    let mut phi_cache:Vec<f64>=binomial_tree::get_all_t(
+        option_maturity-t, 
+        num_steps
+    ).map(|t_a|phi_t(a, sigma, t_a, forward_curve)).collect();
+    phi_cache.push(
+        phi_t(a, sigma, option_maturity-t, forward_curve)
+    );
     let payoff=|t_step:f64, curr_val:f64, _dt:f64, j:usize| {
         let swp=swap_price_t(
             curr_val+phi_cache[j], 
@@ -890,110 +901,14 @@ mod tests {
             epsilon=0.0000001
         );
     }
-    #[test]
-    fn test_coupon_bond_now(){
-        let curr_rate=0.02;
-        let sig:f64=0.02;
-        let a:f64=0.3;
-        let b=0.04;
-        let delta=0.25;
-        let future_time=0.0;
-        let yield_curve=|t:f64|{
-            let at=(1.0-(-a*t).exp())/a;
-            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
-            at*curr_rate-ct
-        };
-        
-        let coupon_times=get_coupon_times(5, future_time, delta);
-        let coupon_rate=curr_rate*delta;
-        let bond_price=coupon_bond_price_now(
-            &coupon_times, 
-            *coupon_times.last().unwrap()+delta, 
-            coupon_rate, 
-            &yield_curve
-        );
-        assert_abs_diff_eq!(
-            bond_price, 
-            1.0, 
-            epsilon=0.0000001
-        );
-    }
-    #[test]
-    fn test_rate_convergence(){
-        let curr_rate=0.02;
-        let sig:f64=0.02;
-        let a:f64=0.3;
-        let b=0.04;
-        let delta=0.25;
-        let strike=1.0;
-        let future_time=0.5;
-        //let swap_maturity=5.5;
-        //let option_maturity=1.5;
-        let yield_curve=|t:f64|{
-            let at=(1.0-(-a*t).exp())/a;
-            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
-            at*curr_rate-ct
-        };
-        let forward_curve=|t:f64|{
-            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
-        };
-        let coupon_times=get_coupon_times(5, future_time, delta);
-        let coupon_rate=0.05;
-        let tmp_coupon_bond_price_t=coupon_bond_price_t(
-            curr_rate, a, sig, future_time, 
-            &coupon_times, 
-            *coupon_times.last().unwrap()+delta, 
-            coupon_rate*delta, 
-            &yield_curve, &forward_curve
-        );
-        let tmp_coupon_bond_price_t_at_par=coupon_bond_price_t(
-            coupon_rate, a, sig, future_time, 
-            &coupon_times, 
-            *coupon_times.last().unwrap()+delta, 
-            coupon_rate*delta, 
-            &yield_curve, &forward_curve
-        );
-        let fn_to_optimize=|r|{
-            coupon_bond_price_t(
-                r, a, sig, future_time, 
-                &coupon_times, 
-                *coupon_times.last().unwrap()+delta,
-                coupon_rate*delta, 
-                &yield_curve, &forward_curve
-            )-strike
-        };
-        let fn_derv=|r|{
-            coupon_bond_price_t_deriv(
-                r, a, sig, future_time, 
-                &coupon_times, 
-                *coupon_times.last().unwrap()+delta,
-                coupon_rate*delta, 
-                &yield_curve, &forward_curve
-            )
-        };
-        let r_optimal=nrfind::find_root(
-            &fn_to_optimize, &fn_derv, 
-            R_INIT, PREC_1, MAX_ITER
-        ).expect("Requires convergence of optimal r");
-        println!("r_optimal: {}", r_optimal);
-        println!("bond at rate: {}", tmp_coupon_bond_price_t);
-        println!("bond at par: {}", tmp_coupon_bond_price_t_at_par);
-        assert_eq!(
-            r_optimal<coupon_rate,
-            true
-        );
-    }
-
+   
     #[test]
     fn test_bond_price() {
         let curr_rate=0.02;
         let sig:f64=0.02;
         let a:f64=0.3;
         let b=0.04;
-        //let delta=0.25;
-        //let strike=0.04;
         let future_time=0.5;
-        //let swap_maturity=5.5;
         let option_maturity=1.5;
         let yield_curve=|t:f64|{
             let at=(1.0-(-a*t).exp())/a;
@@ -1014,11 +929,7 @@ mod tests {
         let sig:f64=0.02;
         let a:f64=0.3;
         let b=0.04;
-        //let delta=0.25;
-        //let strike=0.04;
         let future_time=0.5;
-        //let swap_maturity=5.5;
-        //let option_maturity=1.5;
         let yield_curve=|t:f64|{
             let at=(1.0-(-a*t).exp())/a;
             let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
@@ -1039,10 +950,8 @@ mod tests {
         let a:f64=0.3;
         let b=0.04;
         let delta=0.25;
-       // let strike=0.04;
         let future_time=0.5;
         let swap_maturity=5.5;
-        //let option_maturity=1.5;
         let yield_curve=|t:f64|{
             let at=(1.0-(-a*t).exp())/a;
             let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
@@ -1070,12 +979,11 @@ mod tests {
     }
     #[test]
     fn payer_swaption(){
-        let curr_rate=0.02;
-        let sig:f64=0.02;
-        let a:f64=0.3;
-        let b=0.04;
+        let curr_rate=0.05;
+        let sig:f64=0.01;
+        let a:f64=0.05;
+        let b=0.05;
         let delta=0.25;
-        //let strike=0.04;
         let future_time=0.0;
         let swap_tenor=5.0;
         let option_maturity=1.0;
@@ -1095,16 +1003,17 @@ mod tests {
             &forward_curve
         );
         let analytical=european_payer_swaption_t(
-            curr_rate, a, sig, swap_rate,
+            curr_rate, a, sig, 
             future_time, swap_tenor, 
-            option_maturity, delta, 
+            option_maturity, delta, swap_rate,
             &yield_curve, &forward_curve
         );
         let is_payer=true;
+
         let tree=european_swaption_tree(
-            curr_rate, a, sig, swap_rate,
+            curr_rate, a, sig, 
             future_time, swap_tenor, 
-            option_maturity, delta, 
+            option_maturity, delta, swap_rate,
             is_payer, 5000,
             &yield_curve, &forward_curve
         );
@@ -1113,5 +1022,119 @@ mod tests {
             tree,
             epsilon=0.000001
         )
+    }
+    #[test]
+    fn receiver_swaption(){
+        let curr_rate=0.05;
+        let sig:f64=0.01;
+        let a:f64=0.05;
+        let b=0.05;
+        let delta=0.25;
+        let future_time=0.0;
+        let swap_tenor=5.0;
+        let option_maturity=1.0;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let swap_rate=forward_swap_rate_t(
+            curr_rate, a, sig, 
+            future_time, option_maturity, 
+            swap_tenor+option_maturity, 
+            delta, &yield_curve, 
+            &forward_curve
+        );
+        let analytical=european_receiver_swaption_t(
+            curr_rate, a, sig, 
+            future_time, swap_tenor, 
+            option_maturity, delta, swap_rate,
+            &yield_curve, &forward_curve
+        );
+        let is_payer=false;
+
+        let tree=european_swaption_tree(
+            curr_rate, a, sig, 
+            future_time, swap_tenor, 
+            option_maturity, delta, swap_rate,
+            is_payer, 5000,
+            &yield_curve, &forward_curve
+        );
+        assert_abs_diff_eq!(
+            analytical,
+            tree,
+            epsilon=0.000001
+        )
+    }
+    #[test]
+    fn zero_coupon_reference(){ //http://www.quantcalc.net/BondOption_Vasicek.html
+        let curr_rate=0.01;
+        let sig:f64=0.03;
+        let a=0.05;
+        let b=0.04;
+        let strike=0.96;
+        let future_time=0.0;
+        let bond_maturity=3.0;
+        let option_maturity=2.0;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let bond_call=bond_call_t(
+            curr_rate, a, sig, future_time, option_maturity, 
+            bond_maturity, strike, 
+            &yield_curve, &forward_curve
+        );
+        assert_abs_diff_eq!(
+            bond_call,
+            0.033282,
+            epsilon=0.0001
+        )
+
+    }
+    #[test]
+    fn zero_coupon_to_coupon(){ //http://www.quantcalc.net/BondOption_Vasicek.html
+        let curr_rate=0.01;
+        let sig:f64=0.03;
+        let a=0.05;
+        let b=0.04;
+        let strike=0.96;
+        let future_time=0.0;
+        let bond_maturity=3.0;
+        let option_maturity=2.0;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let bond_call=bond_call_t(
+            curr_rate, a, sig, future_time, option_maturity, 
+            bond_maturity, strike, 
+            &yield_curve, &forward_curve
+        );
+        let coupon_rate=0.0;
+        let coupon_bond_call=coupon_bond_call_t(
+            curr_rate, a, sig, future_time, option_maturity, 
+            &[], bond_maturity, 
+            coupon_rate, strike, 
+            &yield_curve, &forward_curve
+        );
+        
+        assert_abs_diff_eq!(
+            bond_call,
+            coupon_bond_call,
+            epsilon=0.0001
+        )
+
     }
 }
