@@ -126,6 +126,7 @@ pub fn bond_price_t(
     ).exp()
 }
 
+//used for newton's method
 fn bond_price_t_deriv(
     r_t:f64,
     a:f64,
@@ -264,8 +265,8 @@ pub fn coupon_bond_price_now(
 )->f64{
     coupon_bond_generic_now(
         coupon_times, 
-        coupon_rate,
         bond_maturity,
+        coupon_rate,
         yield_curve,
         &bond_price_now
     )
@@ -352,7 +353,7 @@ fn coupon_bond_option_generic_t(
     let final_payment=generic_fn(
         r_t, a, sigma, t, option_maturity, 
         bond_maturity, 
-        bond_price_t( //DO I NEED TO ADD THIS AS WELL?
+        bond_price_t( 
             r_optimal,
             a, sigma, option_maturity,
             bond_maturity,
@@ -368,7 +369,7 @@ fn coupon_bond_option_generic_t(
                 accum+coupon_rate*generic_fn(
                     r_t, a, sigma, t, option_maturity, 
                     *coupon_time, 
-                    bond_price_t( //DO I NEED TO ADD THIS AS WELL
+                    bond_price_t( 
                         r_optimal,
                         a, sigma, option_maturity,
                         *coupon_time,
@@ -626,6 +627,7 @@ pub fn european_payer_swaption_t(
     let num_payments=get_num_payments(t, swap_tenor, delta) as usize;
     let coupon_times=get_coupon_times(num_payments, option_maturity, delta);
     let strike=1.0;
+    coupon_times.iter().for_each(|v|println!("this is v: {}", v));
     coupon_bond_put_t(
         r_t, a, sigma, t, 
         option_maturity, 
@@ -652,7 +654,8 @@ pub fn european_receiver_swaption_t(
     let num_payments=get_num_payments(t, swap_tenor, delta) as usize;
     let coupon_times=get_coupon_times(num_payments, option_maturity, delta);
     let strike=1.0;
-    coupon_bond_put_t(
+    coupon_times.iter().for_each(|v|println!("this is v: {}", v));
+    coupon_bond_call_t(
         r_t, a, sigma, t, 
         option_maturity, 
         &coupon_times, 
@@ -660,7 +663,7 @@ pub fn european_receiver_swaption_t(
         swap_rate*delta, 
         strike, yield_curve, 
         forward_curve
-    ) //swaption is equal to call on coupon bond with coupon=swaption swapRate*delta and strike 1.
+    ) //swaption is equal to call on coupon bond with coupon=swapRate*delta and strike 1.
 }
 
 
@@ -819,7 +822,168 @@ fn european_swaption_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    #[test]
+    fn test_bond_now_same_as_t_when_t_is_zero(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let future_time=0.0;
+        let maturity=1.5;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let bond_price_now=bond_price_now(
+            maturity, 
+            &yield_curve
+        );
+        let bond_price_t=bond_price_t(
+            curr_rate, a, sig, future_time, 
+            maturity,
+            &yield_curve, &forward_curve
+        );
+        assert_abs_diff_eq!(
+            bond_price_now, 
+            bond_price_t, 
+            epsilon=0.0000001
+        );
+    }
+    #[test]
+    fn test_coupon_bond_now_same_as_t_when_t_is_zero(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let delta=0.25;
+        let future_time=0.0;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let coupon_times=get_coupon_times(5, future_time, delta);
+        let coupon_rate=0.05*delta;
+        let bond_price_now=coupon_bond_price_now(
+            &coupon_times, 
+            *coupon_times.last().unwrap()+delta, 
+            coupon_rate, 
+            &yield_curve
+        );
+        let bond_price_t=coupon_bond_price_t(
+            curr_rate, a, sig, future_time, 
+            &coupon_times, 
+            *coupon_times.last().unwrap()+delta, 
+            coupon_rate, 
+            &yield_curve, &forward_curve
+        );
+        assert_abs_diff_eq!(
+            bond_price_now, 
+            bond_price_t, 
+            epsilon=0.0000001
+        );
+    }
+    #[test]
+    fn test_coupon_bond_now(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let delta=0.25;
+        let future_time=0.0;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        
+        let coupon_times=get_coupon_times(5, future_time, delta);
+        let coupon_rate=curr_rate*delta;
+        let bond_price=coupon_bond_price_now(
+            &coupon_times, 
+            *coupon_times.last().unwrap()+delta, 
+            coupon_rate, 
+            &yield_curve
+        );
+        assert_abs_diff_eq!(
+            bond_price, 
+            1.0, 
+            epsilon=0.0000001
+        );
+    }
+    #[test]
+    fn test_rate_convergence(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let delta=0.25;
+        let strike=1.0;
+        let future_time=0.5;
+        //let swap_maturity=5.5;
+        //let option_maturity=1.5;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let coupon_times=get_coupon_times(5, future_time, delta);
+        let coupon_rate=0.05;
+        let tmp_coupon_bond_price_t=coupon_bond_price_t(
+            curr_rate, a, sig, future_time, 
+            &coupon_times, 
+            *coupon_times.last().unwrap()+delta, 
+            coupon_rate*delta, 
+            &yield_curve, &forward_curve
+        );
+        let tmp_coupon_bond_price_t_at_par=coupon_bond_price_t(
+            coupon_rate, a, sig, future_time, 
+            &coupon_times, 
+            *coupon_times.last().unwrap()+delta, 
+            coupon_rate*delta, 
+            &yield_curve, &forward_curve
+        );
+        let fn_to_optimize=|r|{
+            coupon_bond_price_t(
+                r, a, sig, future_time, 
+                &coupon_times, 
+                *coupon_times.last().unwrap()+delta,
+                coupon_rate*delta, 
+                &yield_curve, &forward_curve
+            )-strike
+        };
+        let fn_derv=|r|{
+            coupon_bond_price_t_deriv(
+                r, a, sig, future_time, 
+                &coupon_times, 
+                *coupon_times.last().unwrap()+delta,
+                coupon_rate*delta, 
+                &yield_curve, &forward_curve
+            )
+        };
+        let r_optimal=nrfind::find_root(
+            &fn_to_optimize, &fn_derv, 
+            R_INIT, PREC_1, MAX_ITER
+        ).expect("Requires convergence of optimal r");
+        println!("r_optimal: {}", r_optimal);
+        println!("bond at rate: {}", tmp_coupon_bond_price_t);
+        println!("bond at par: {}", tmp_coupon_bond_price_t_at_par);
+        assert_eq!(
+            r_optimal<coupon_rate,
+            true
+        );
+    }
+
     #[test]
     fn test_bond_price() {
         let curr_rate=0.02;
