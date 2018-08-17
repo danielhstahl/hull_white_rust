@@ -6,7 +6,6 @@ extern crate binomial_tree;
 #[cfg(test)]
 extern crate approx;
 
-//nrfind::find_root(&obj_fn, &dfn, initial_guess, precision, iterations).unwrap()
 /**
  * Note: the fundamental times 
  * here are (0, t, T, TM).  0 is 
@@ -528,7 +527,7 @@ fn get_num_payments(
     maturity:f64,
     delta:f64
 )->f64{
-    (maturity-t)/delta+1.0
+    ((maturity-t)/delta).floor()+1.0
 }
 
 
@@ -833,6 +832,100 @@ fn european_swaption_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_get_num_payments(){
+        let t=0.5;
+        let maturity=2.0;
+        let delta=0.25;
+        let num_payments=get_num_payments(t, maturity, delta);
+        assert_eq!(num_payments, 7.0);
+    }
+
+    #[test]
+    fn test_get_num_payments_not_even(){
+        let t=0.5;
+        let maturity=2.0;
+        let delta=0.4;
+        let num_payments=get_num_payments(t, maturity, delta);
+        assert_eq!(num_payments, 4.0);
+    }
+
+    #[test]
+    fn test_get_time_from_t_index(){
+        let t=0.5;
+        let delta=0.4;
+        let index=3;
+        let time=get_time_from_t_index(index, t, delta);
+        assert_abs_diff_eq!(time, 1.7, epsilon=0.0000001);
+    }
+    #[test]
+    fn test_get_time_from_t_index_with_zero_index(){
+        let t=0.5;
+        let delta=0.4;
+        let index=0;
+        let time=get_time_from_t_index(index, t, delta);
+        assert_eq!(time, t);
+    }
+    #[test]
+    fn test_get_coupon_times(){
+        let num_payments=5;
+        let t=1.0;
+        let delta=0.25;
+        let coupon_times=get_coupon_times(num_payments, t, delta);
+        let expected_coupon_times=vec![1.25, 1.5, 1.75, 2.0, 2.25];
+        coupon_times.iter()
+            .zip(expected_coupon_times.iter())
+            .for_each(|(actual, expected)|assert_eq!(actual, expected))
+    }
+    #[test]
+    fn test_get_coupon_times_no_payments(){
+        let num_payments=0;
+        let t=1.0;
+        let delta=0.25;
+        let coupon_times=get_coupon_times(num_payments, t, delta);
+        assert_eq!(coupon_times.len(), 0);
+    }
+
+    #[test]
+    fn test_max_or_zero(){
+        let v=1.0;
+        assert_eq!(max_or_zero(v), 1.0);
+        assert_eq!(max_or_zero(-v), 0.0);
+    }
+
+    #[test]
+    fn test_payoff_swaption(){
+        let v=1.0;
+        assert_eq!(
+            payoff_swaption(true, v),
+            1.0
+        );
+        assert_eq!(
+            payoff_swaption(false, v),
+            0.0
+        );
+        assert_eq!(
+            payoff_swaption(true, -v),
+            0.0
+        );
+        assert_eq!(
+            payoff_swaption(false, -v),
+            1.0
+        );
+    }
+
+    #[test]
+    fn test_caplet(){
+
+    }
+
+    #[test]
+    fn test_edf(){
+
+    }
+
+
     #[test]
     fn test_bond_now_same_as_t_when_t_is_zero(){
         let curr_rate=0.02;
@@ -1014,13 +1107,13 @@ mod tests {
             curr_rate, a, sig, 
             future_time, swap_tenor, 
             option_maturity, delta, swap_rate,
-            is_payer, 5000,
+            is_payer, 100,
             &yield_curve, &forward_curve
         );
         assert_abs_diff_eq!(
             analytical,
             tree,
-            epsilon=0.000001
+            epsilon=0.0001
         )
     }
     #[test]
@@ -1060,13 +1153,13 @@ mod tests {
             curr_rate, a, sig, 
             future_time, swap_tenor, 
             option_maturity, delta, swap_rate,
-            is_payer, 5000,
+            is_payer, 100,
             &yield_curve, &forward_curve
         );
         assert_abs_diff_eq!(
             analytical,
             tree,
-            epsilon=0.000001
+            epsilon=0.0001
         )
     }
     #[test]
@@ -1100,7 +1193,7 @@ mod tests {
 
     }
     #[test]
-    fn zero_coupon_to_coupon(){ //http://www.quantcalc.net/BondOption_Vasicek.html
+    fn zero_coupon_to_coupon(){ 
         let curr_rate=0.01;
         let sig:f64=0.03;
         let a=0.05;

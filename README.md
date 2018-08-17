@@ -10,3 +10,11 @@
 ## Hull White 
 
 This library implements functions that price fixed income products assuming that short rates follow a Hull-White process.
+
+## Documentation
+
+The [Documentation][./documentation] holds the documentation for the various pricing functions and assumptions.  
+
+## Requirements
+
+The documentation is written in [R Sweave](https://www.r-bloggers.com/getting-started-with-sweave-r-latex-eclipse-statet-texlipse/).  The application is written in [Rust](https://www.rust-lang.org/en-US/). 
