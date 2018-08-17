@@ -13,7 +13,7 @@ This library implements functions that price fixed income products assuming that
 
 ## Documentation
 
-The [Documentation][./documentation] holds the documentation for the various pricing functions and assumptions.  
+The [Documentation](./documentation) holds the documentation for the various pricing functions and assumptions.  
 
 ## Requirements
 
