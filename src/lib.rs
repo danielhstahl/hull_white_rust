@@ -520,6 +520,14 @@ fn gamma_edf(
     let exp_d=(-a*delta).exp();
     (sigma.powi(2)/a.powi(3))*(1.0-exp_d)*((1.0-exp_t)-exp_d*0.5*(1.0-exp_t.powi(2)))
 }
+fn edf_compute(
+    bond_num:f64,
+    bond_den:f64,
+    gamma:f64,
+    delta:f64
+)->f64{
+    ((bond_num/bond_den)*gamma.exp()-1.0)/delta
+}
 pub fn euro_dollar_future_t(
     r_t:f64,
     a:f64,
@@ -531,23 +539,24 @@ pub fn euro_dollar_future_t(
     forward_curve:&Fn(f64)->f64
 )->f64{
     let gamma=gamma_edf(a, sigma, t, option_maturity, delta);
-    (
-        (
-            bond_price_t(
-                r_t,
-                a, sigma,
-                t, option_maturity,
-                yield_curve, 
-                forward_curve
-            )/bond_price_t(
-                r_t,
-                a, sigma,
-                t, option_maturity+delta,
-                yield_curve, 
-                forward_curve
-            )
-        )*gamma.exp()-1.0
-    )/delta
+    edf_compute(
+        bond_price_t(
+            r_t,
+            a, sigma,
+            t, option_maturity,
+            yield_curve, 
+            forward_curve
+        ),
+        bond_price_t(
+            r_t,
+            a, sigma,
+            t, option_maturity+delta,
+            yield_curve, 
+            forward_curve
+        ),
+        gamma, 
+        delta
+    )
 }
 pub fn euro_dollar_future_now(
     a:f64,
@@ -557,17 +566,18 @@ pub fn euro_dollar_future_now(
     yield_curve:&Fn(f64)->f64
 )->f64{
     let gamma=gamma_edf(a, sigma, 0.0, option_maturity, delta);
-    (
-        (
-            bond_price_now(
-                option_maturity,
-                yield_curve,
-            )/bond_price_now(
-                option_maturity+delta,
-                yield_curve
-            )
-        )*gamma.exp()-1.0
-    )/delta
+    edf_compute(
+        bond_price_now(
+            option_maturity,
+            yield_curve,
+        ),
+        bond_price_now(
+            option_maturity+delta,
+            yield_curve
+        ),
+        gamma, 
+        delta
+    )
 }
 
 fn compute_libor_rate(
