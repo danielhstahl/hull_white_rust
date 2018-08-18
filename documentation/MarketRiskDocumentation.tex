@@ -95,16 +95,7 @@ Hence option pricing on the bond reduces to the Black Scholes formula with \[\si
 \[\sigma_{BS}=\frac{\sigma}{a}\left(1-e^{-a\delta}\right)\sqrt{\frac{1}{T} \int_0 ^ T e^{-2a(T-t)} dt}\]
 \[\sigma_{BS}=\frac{\sigma}{a}\left(1-e^{-a\delta}\right)\sqrt{\frac{1-e^{-2aT}}{2aT}}\]
 
-Note that the volatility depends only on \(a\) and \(\sigma\) and hence these parameters can be calibrated to the cap market. However, in the absence of free market data on caplet prices, \(a\) and \(\sigma\) are inputs provided by the user for demonstration purposes.  
-
-\subsection{Calibration to historical data}
- Recall that \(r_t=a(b-r_t)dt+\sigma dW_t\).  \(a\) and \(\sigma\) are already known.  \(r_t\) has the following solution:
-\[r_T= e^{-a(T-t)}r_t+b\left(1-e^{-a(T-t)}\right)+\epsilon_{T-t}\]
-Where \(\epsilon_{T-t}\) is white noise.  Solving for \(b\),
-
-\[b=\frac{r_T-e^{-a(T-t)}r_t}{1-e^{-a(T-t)}}+\hat{\epsilon_{T-t}}\]
-
-Given a time series of observations of \(r_{t_i}\) it is thus trivial to estimate \(b\).
+Note that the volatility depends only on \(a\) and \(\sigma\) and hence these parameters can be calibrated to the cap market. 
 
 \section{Pricing Modules}
 The following ``generic'' functions are available: tree (lattice) methods (\ref{tree}), analytic Black Scholes formula (\ref{BS}), and Jamshidian's trick for finding options on a portfolio (\ref{Jamshidian}). From these generic functions, the fixed income derivatives can be priced. 
@@ -163,7 +154,7 @@ Consider the SDE \(dX=\alpha(X, t)dt+\sigma(X, t)dW_t\).  Now consider \(f(y)\) 
   
 \subsection{Jamshidian's Trick} \label{Jamshidian}
 
-Jamshidian pointed out that an option with payoff \(\left(\sum f(r) -k\right)^+\) is equal to a portfolio of options \(\sum (f(r)-f(r_*))^+\) where \(r_*\) is the solution to \(\sum f(r)-f(r_*)=0\) and \(f\) is a monotonic function. Hence an option on a coupon bond can be written as a series of options on zero coupon bonds.   Solving for \(r_*\) involves Newton's method for finding the zero's of a function which can be trivially implemented with automatic differentiation.  
+Jamshidian pointed out that an option with payoff \(\left(\sum f(r) -k\right)^+\) is equal to a portfolio of options \(\sum (f(r)-f(r_*))^+\) where \(r_*\) is the solution to \(\sum f(r)-f(r_*)=0\) and \(f\) is a monotonic function. Hence an option on a coupon bond can be written as a series of options on zero coupon bonds.   Solving for \(r_*\) involves Newton's method for finding the zero's of a function.  
 
 
 
