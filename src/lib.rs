@@ -6,6 +6,14 @@ extern crate binomial_tree;
 #[cfg(test)]
 extern crate approx;
 
+#[cfg(test)]
+extern crate rand;
+#[cfg(test)]
+use rand::{SeedableRng, StdRng};
+#[cfg(test)]
+use rand::distributions::StandardNormal;
+#[cfg(test)]
+use rand::distributions::{Distribution};
 /**
  * Note: the fundamental times 
  * here are (0, t, T, TM).  0 is 
@@ -54,7 +62,7 @@ fn ct_t(
 }
 
 //t_forward_bond_vol(a, sigma, t, option_maturity, bond_maturity) 
-fn t_forward_bond_vol(
+pub fn t_forward_bond_vol(
     a:f64,
     sigma:f64,
     t:f64,
@@ -75,8 +83,8 @@ fn phi_t(
     let exp_t=1.0-(-a*t).exp();
     forward_curve(t)+(sigma*exp_t).powi(2)/(2.0*a.powi(2))
 }
-/*
-fn mu_r(
+
+pub fn mu_r(
     r_t:f64,
     a:f64,
     sigma:f64,
@@ -86,30 +94,19 @@ fn mu_r(
 )->f64{
     phi_t(a, sigma, t_m, forward_curve)+(r_t-phi_t(
         a, sigma, t, forward_curve
-    ))*(-a*(t_m-t).exp())
+    ))*(-a*(t_m-t)).exp()
 }
 
-fn variance_r(
+pub fn variance_r(
     a:f64,
     sigma:f64,
     t:f64,
-    T:f64
+    t_m:f64
 )->f64{
-    sigma.powi(2)*(1.0-(-2.0*a*(T-t)).exp())/(2.0*a)
+    sigma.powi(2)*(1.0-(-2.0*a*(t_m-t)).exp())/(2.0*a)
 }
 
-fn get_max_float(
-    arr:&[f64]
-)->f64{
-    arr.iter().fold(0.0 as f64, |running_max, elem|{
-        if *elem>running_max {
-            *elem
-        }
-        else {
-            running_max
-        }
-    })
-}*/
+
 
 pub fn bond_price_t(
     r_t:f64,
@@ -490,7 +487,40 @@ pub fn caplet_now(
     )
 }
 
-pub fn euro_dollar_future(
+pub fn caplet_t(
+    r_t:f64,
+    a:f64,
+    sigma:f64,
+    t:f64,
+    option_maturity:f64,
+    delta:f64, //tenor of simple yield
+    strike:f64,
+    yield_curve:&Fn(f64)->f64,
+    forward_curve:&Fn(f64)->f64
+)->f64{
+    (strike*delta+1.0)*bond_put_t(
+        r_t, a, sigma, t, 
+        option_maturity, 
+        option_maturity+delta, 
+        1.0/(delta*strike+1.0),
+        yield_curve, 
+        forward_curve
+    )
+}
+//https://www.math.nyu.edu/~alberts/spring07/Lecture5.pdf
+//https://developers.opengamma.com/quantitative-research/Hull-White-One-Factor-Model-OpenGamma.pdf (note that in the open gamma derivation, t0=option_maturity)
+fn gamma_edf(
+    a:f64,
+    sigma:f64,
+    t:f64,
+    option_maturity:f64,
+    delta:f64,
+)->f64{
+    let exp_t=(-a*(option_maturity-t)).exp();
+    let exp_d=(-a*delta).exp();
+    (sigma.powi(2)/a.powi(3))*(1.0-exp_d)*((1.0-exp_t)-exp_d*0.5*(1.0-exp_t.powi(2)))
+}
+pub fn euro_dollar_future_t(
     r_t:f64,
     a:f64,
     sigma:f64,
@@ -500,9 +530,7 @@ pub fn euro_dollar_future(
     yield_curve:&Fn(f64)->f64,
     forward_curve:&Fn(f64)->f64
 )->f64{
-    let exp_t=(-a*(option_maturity-t)).exp();
-    let exp_d=(-a*delta).exp();
-    let gamma=(sigma.powi(2)/a.powi(3))*(1.0-exp_d)*((1.0-exp_t)-exp_d*0.5*(1.0-exp_t.powi(2)));
+    let gamma=gamma_edf(a, sigma, t, option_maturity, delta);
     (
         (
             bond_price_t(
@@ -521,6 +549,81 @@ pub fn euro_dollar_future(
         )*gamma.exp()-1.0
     )/delta
 }
+pub fn euro_dollar_future_now(
+    a:f64,
+    sigma:f64,
+    option_maturity:f64,
+    delta:f64, //tenor of simple yield
+    yield_curve:&Fn(f64)->f64
+)->f64{
+    let gamma=gamma_edf(a, sigma, 0.0, option_maturity, delta);
+    (
+        (
+            bond_price_now(
+                option_maturity,
+                yield_curve,
+            )/bond_price_now(
+                option_maturity+delta,
+                yield_curve
+            )
+        )*gamma.exp()-1.0
+    )/delta
+}
+
+fn compute_libor_rate(
+    nearest_bond:f64,
+    farthest_bond:f64,
+    tenor:f64
+)->f64{
+    (nearest_bond-farthest_bond)/(farthest_bond*tenor)
+}
+pub fn forward_libor_rate_t(
+    r_t:f64,
+    a:f64,
+    sigma:f64,
+    t:f64,
+    maturity:f64,
+    delta:f64, //tenor of simple yield
+    yield_curve:&Fn(f64)->f64,
+    forward_curve:&Fn(f64)->f64
+)->f64{
+    let nearest_bond=bond_price_t(
+        r_t, a, sigma, t, 
+        maturity, 
+        &yield_curve, &forward_curve
+    );
+    let farthest_bond=bond_price_t(
+        r_t, a, sigma, t, 
+        maturity+delta, 
+        &yield_curve, &forward_curve
+    );
+    compute_libor_rate(nearest_bond, farthest_bond, delta)
+}
+pub fn forward_libor_rate_now(
+    maturity:f64,
+    delta:f64, //tenor of simple yield
+    yield_curve:&Fn(f64)->f64
+)->f64{
+    let nearest_bond=bond_price_now(maturity, &yield_curve);
+    let farthest_bond=bond_price_now(maturity+delta, &yield_curve);
+    compute_libor_rate(nearest_bond, farthest_bond, delta)
+}
+pub fn libor_rate_t(
+    r_t:f64,
+    a:f64,
+    sigma:f64,
+    t:f64,
+    delta:f64, //tenor of simple yield
+    yield_curve:&Fn(f64)->f64,
+    forward_curve:&Fn(f64)->f64
+)->f64{
+    forward_libor_rate_t(
+        r_t, a, sigma, t, 
+        t, delta,
+        yield_curve, forward_curve
+    )
+}
+
 
 fn get_num_payments(
     t:f64,
@@ -832,7 +935,9 @@ fn european_swaption_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    fn get_rng_seed(seed:[u8; 32])->StdRng{
+        SeedableRng::from_seed(seed) 
+    }
     #[test]
     fn test_get_num_payments(){
         let t=0.5;
@@ -914,18 +1019,184 @@ mod tests {
             1.0
         );
     }
-
+    #[test]
+    fn compare_caplet(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let future_time=0.0;
+        let option_maturity=1.5;
+        let strike=0.02;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let delta=0.25;
+        let caplet_n=caplet_now(
+            a, sig, option_maturity, 
+            delta, strike, &yield_curve
+        );
+        let caplet=caplet_t(
+            curr_rate, a, sig, 
+            future_time, option_maturity, 
+            delta, strike, 
+            &yield_curve, &forward_curve
+        );
+        assert_abs_diff_eq!(
+            caplet_n,
+            caplet,
+            epsilon=0.00001
+        );  
+    }
+    #[test]
+    fn compare_libor(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let future_time=0.0;
+        let maturity=1.5;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let delta=0.25;
+        let libor_n=forward_libor_rate_now(maturity, delta, &yield_curve);
+        let libor_t=forward_libor_rate_t(
+            curr_rate, a, sig, future_time, 
+            maturity, delta, 
+            &yield_curve, &forward_curve
+        );
+         assert_abs_diff_eq!(
+            libor_n,
+            libor_t,
+            epsilon=0.0001
+        );
+    }
     #[test]
     fn test_caplet(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let future_time=0.0;
+        let option_maturity=1.5;
+        let strike=0.02;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let delta=0.25;
+        let seed:[u8; 32]=[2; 32];
+        let mut rng_seed=get_rng_seed(seed);
+        let normal=StandardNormal;
+        let num_sims:usize=1000; //hopefully accurate
+        let num_discrete_steps:usize=1000;
+        let total_sum=(0..num_sims).fold(0.0, move |accum, _sample_index|{
+            let mut sum_r=0.0;
+            let mut running_r=curr_rate;
+            let dt=(option_maturity-future_time)/(num_discrete_steps as f64-1.0);
+            (0..num_discrete_steps).for_each(|t_index|{
+                let norm=normal.sample(&mut rng_seed);
+                let curr_t=dt*(t_index as f64)+future_time;
+                let curr_vol=variance_r(a, sig, curr_t, curr_t+dt).sqrt();
+                let curr_mu=mu_r(running_r, a, sig, curr_t, curr_t+dt, &forward_curve);
+                running_r=curr_mu+curr_vol*norm;
+                sum_r=sum_r+running_r*dt;
+            });
+            let libor_at_option_maturity=libor_rate_t(
+                running_r, a, sig, 
+                option_maturity, delta, 
+                &yield_curve, &forward_curve
+            );
+            //And some more steps since discounted in arrears 
+            let more_steps=(delta/dt).floor() as usize;
+            let new_dt=delta/(more_steps as f64-1.0);
+            (1..more_steps).for_each(|t_index|{
+                let norm=normal.sample(&mut rng_seed);
+                let curr_t=new_dt*(t_index as f64)+option_maturity;
+                let curr_vol=variance_r(a, sig, curr_t, curr_t+new_dt).sqrt();
+                let curr_mu=mu_r(running_r, a, sig, curr_t, curr_t+new_dt, &forward_curve);
+                running_r=curr_mu+curr_vol*norm;
+                sum_r=sum_r+running_r*new_dt;
+            });
 
+            if libor_at_option_maturity>strike {
+                accum+(libor_at_option_maturity-strike)*((-sum_r).exp())//discount
+            }
+            else {
+                accum
+            }
+        });
+        let average_caplet=delta*(total_sum/(num_sims as f64));
+
+        let analytical_caplet=caplet_now(a, sig, option_maturity, delta, strike, &yield_curve);
+        assert_abs_diff_eq!(
+            average_caplet,
+            analytical_caplet,
+            epsilon=0.0001
+        );        
     }
 
     #[test]
     fn test_edf(){
+        let curr_rate=0.02;
+        let sig:f64=0.02;
+        let a:f64=0.3;
+        let b=0.04;
+        let future_time=0.0;
+        let option_maturity=1.5;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let delta=0.25;
+        let seed:[u8; 32]=[2; 32];
+        let mut rng_seed=get_rng_seed(seed);
+        let normal=StandardNormal;
+        let num_sims:usize=1000000; //hopefully accurate
+        let mu=mu_r(curr_rate, a, sig, future_time, option_maturity, &forward_curve);
+        let vol=variance_r(a, sig, future_time, option_maturity).sqrt();
+        let total_sum=(0..num_sims).fold(0.0, move |accum, _sample_index|{
+            let norm=normal.sample(&mut rng_seed);
+            let final_r=mu+vol*norm;
+            let final_bond=bond_price_t(
+                final_r, a, sig, option_maturity, option_maturity+delta, 
+                &yield_curve, &forward_curve
+            );
+            accum+1.0/final_bond
+        });
+        let average_edf=((total_sum/(num_sims as f64))-1.0)/delta;
 
+        let analytical_edf=euro_dollar_future_t(
+            curr_rate, a, sig, future_time, 
+            option_maturity, delta, 
+            &yield_curve, &forward_curve
+        );
+        assert_abs_diff_eq!(
+            average_edf,
+            analytical_edf,
+            epsilon=0.0001
+        );        
     }
-
-
+    
     #[test]
     fn test_bond_now_same_as_t_when_t_is_zero(){
         let curr_rate=0.02;
