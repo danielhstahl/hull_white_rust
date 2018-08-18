@@ -71,7 +71,10 @@ fn ct_t(
 /// let t = 1.0;
 /// let t_m = 2.0;
 /// let t_f = 3.0;
-/// let bond_vol = hull_white::t_forward_bond_vol(a, sigma, t, t_m, t_f);
+/// let bond_vol = hull_white::t_forward_bond_vol(
+///     a, sigma, t, 
+///     t_m, t_f
+/// );
 /// ```
 pub fn t_forward_bond_vol(
     a:f64,
@@ -110,7 +113,11 @@ fn phi_t(
 /// let t = 1.0; //time from "now" (0) to start taking the expectation
 /// let t_m = 2.0; //horizon of the expectation
 /// let forward_curve = |t:f64|t.ln();
-/// let expected_value = hull_white::mu_r(r_t, a, sigma, t, t_m, &forward_curve);
+/// let expected_value = hull_white::mu_r(
+///     r_t, a, sigma, 
+///     t, t_m, 
+///     &forward_curve
+/// );
 /// ```
 pub fn mu_r(
     r_t:f64,
@@ -144,7 +151,7 @@ pub fn variance_r(
     sigma.powi(2)*(1.0-(-2.0*a*(t_m-t)).exp())/(2.0*a)
 }
 
-/// Returns price of a bond at some future date
+/// Returns price of a zero coupon bond at some future date
 ///
 /// # Examples
 ///
@@ -154,9 +161,12 @@ pub fn variance_r(
 /// let sigma = 0.3; //volatility of underlying Hull White process
 /// let t = 1.0; //time from "now" (0) to start valuing the bond
 /// let bond_maturity = 2.0; 
-/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "row" yield (not divided by maturity)
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
 /// let forward_curve = |t:f64|t.ln();
-/// let bond_price = hull_white::bond_price_t(r_t, a, sigma, t, bond_maturity, &yield_curve, &forward_curve);
+/// let bond_price = hull_white::bond_price_t(
+///     r_t, a, sigma, t, bond_maturity, 
+///     &yield_curve, &forward_curve
+/// );
 /// ```
 pub fn bond_price_t(
     r_t:f64,
@@ -190,6 +200,18 @@ fn bond_price_t_deriv(
     ).exp()*at_t_c
 }
 
+/// Returns price of a zero coupon bond at current date
+///
+/// # Examples
+///
+/// ```
+/// let bond_maturity = 2.0; 
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let bond_price = hull_white::bond_price_now(
+///     bond_maturity, 
+///     &yield_curve
+/// );
+/// ```
 pub fn bond_price_now(
     bond_maturity:f64,
     yield_curve:&Fn(f64)->f64
@@ -257,7 +279,27 @@ fn coupon_bond_generic_now(
         }
     )
 }
-//par=1
+/// Returns price of a coupon bond at some future date
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let coupon_times = vec![1.25, 1.5, 1.75]; //should be between t and bond_maturity
+/// let bond_maturity = 2.0; 
+/// let coupon_rate = 0.05;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let bond_price = hull_white::coupon_bond_price_t(
+///     r_t, a, sigma, t, 
+///     &coupon_times, bond_maturity,
+///     coupon_rate, 
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn coupon_bond_price_t(
     r_t:f64,
     a:f64,
@@ -303,7 +345,21 @@ fn coupon_bond_price_t_deriv(
         &bond_price_t_deriv
     )
 }
-
+/// Returns price of a coupon bond at current date
+///
+/// # Examples
+///
+/// ```
+/// let coupon_times = vec![1.25, 1.5, 1.75]; //should be between t and bond_maturity
+/// let bond_maturity = 2.0; 
+/// let coupon_rate = 0.05;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let bond_price = hull_white::coupon_bond_price_now(
+///     &coupon_times, bond_maturity,
+///     coupon_rate, 
+///     &yield_curve
+/// );
+/// ```
 pub fn coupon_bond_price_now(
     coupon_times:&[f64], //does not include the bond_maturity, but the function does check for that
     bond_maturity:f64,
@@ -318,7 +374,27 @@ pub fn coupon_bond_price_now(
         &bond_price_now
     )
 }
-
+/// Returns price of a call option on zero coupon bond at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity=1.5;
+/// let bond_maturity = 2.0; 
+/// let strike=0.98;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let bond_price = hull_white::bond_call_t(
+///     r_t, a, sigma, t, 
+///     option_maturity, bond_maturity,
+///     strike, 
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn bond_call_t(
     r_t:f64,
     a:f64,
@@ -337,7 +413,24 @@ pub fn bond_call_t(
         t_forward_bond_vol(a, sigma, t, option_maturity, bond_maturity) //volatility with maturity
     )
 }
-
+/// Returns price of a call option on zero coupon bond at current time
+///
+/// # Examples
+///
+/// ```
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let option_maturity=1.5;
+/// let bond_maturity = 2.0; 
+/// let strike=0.98;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let bond_price = hull_white::bond_call_now(
+///      a, sigma,  
+///     option_maturity, bond_maturity,
+///     strike, 
+///     &yield_curve
+/// );
+/// ```
 pub fn bond_call_now(
     a:f64,
     sigma:f64,
