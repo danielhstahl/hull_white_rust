@@ -1434,6 +1434,94 @@ mod tests {
         )
     }
     #[test]
+    fn american_payer_swaption(){
+        let curr_rate=0.05;
+        let sig:f64=0.01;
+        let a:f64=0.05;
+        let b=0.05;
+        let delta=0.25;
+        let future_time=0.0;
+        let swap_tenor=5.0;
+        let option_maturity=1.0;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let swap_rate=forward_swap_rate_t(
+            curr_rate, a, sig, 
+            future_time, option_maturity, 
+            swap_tenor+option_maturity, 
+            delta, &yield_curve, 
+            &forward_curve
+        );
+        let analytical=european_payer_swaption_t(
+            curr_rate, a, sig, 
+            future_time, swap_tenor, 
+            option_maturity, delta, swap_rate,
+            &yield_curve, &forward_curve
+        );
+
+        let tree=american_payer_swaption_t(
+            curr_rate, a, sig, 
+            future_time, swap_tenor, 
+            option_maturity, delta, 
+            swap_rate, 100,
+            &yield_curve, &forward_curve
+        );
+        assert_eq!(
+            analytical<tree,
+            true
+        );
+    }
+    #[test]
+    fn american_receiver_swaption(){
+        let curr_rate=0.05;
+        let sig:f64=0.01;
+        let a:f64=0.05;
+        let b=0.05;
+        let delta=0.25;
+        let future_time=0.0;
+        let swap_tenor=5.0;
+        let option_maturity=1.0;
+        let yield_curve=|t:f64|{
+            let at=(1.0-(-a*t).exp())/a;
+            let ct=(b-sig.powi(2)/(2.0*a.powi(2)))*(at-t)-(sig*at).powi(2)/(4.0*a);
+            at*curr_rate-ct
+        };
+        let forward_curve=|t:f64|{
+            b+(-a*t).exp()*(curr_rate-b)-(sig.powi(2)/(2.0*a.powi(2)))*(1.0-(-a*t).exp()).powi(2)
+        };
+        let swap_rate=forward_swap_rate_t(
+            curr_rate, a, sig, 
+            future_time, option_maturity, 
+            swap_tenor+option_maturity, 
+            delta, &yield_curve, 
+            &forward_curve
+        );
+        let analytical=european_receiver_swaption_t(
+            curr_rate, a, sig, 
+            future_time, swap_tenor, 
+            option_maturity, delta, swap_rate,
+            &yield_curve, &forward_curve
+        );
+
+        let tree=american_receiver_swaption_t(
+            curr_rate, a, sig, 
+            future_time, swap_tenor, 
+            option_maturity, delta, 
+            swap_rate, 100,
+            &yield_curve, &forward_curve
+        );
+        assert_eq!(
+            analytical<tree,
+            true
+        );
+    }
+    #[test]
     fn zero_coupon_reference(){ //http://www.quantcalc.net/BondOption_Vasicek.html
         let curr_rate=0.01;
         let sig:f64=0.03;
