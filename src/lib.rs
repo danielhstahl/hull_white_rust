@@ -61,12 +61,26 @@ fn ct_t(
     *((2.0*a*t).exp()-1.0)/(4.0*a.powi(3))
 }
 
-//t_forward_bond_vol(a, sigma, t, option_maturity, bond_maturity) 
+/// Returns volality of bond under the t-forward measure.
+///
+/// # Examples
+///
+/// ```
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0;
+/// let t_m = 2.0;
+/// let t_f = 3.0;
+/// let bond_vol = hull_white::t_forward_bond_vol(a, sigma, t, t_m, t_f);
+/// ```
 pub fn t_forward_bond_vol(
     a:f64,
     sigma:f64,
+    //must be less than t_m and t_f
     t:f64,
+    //must be greater than t and less than t_f
     t_m:f64,
+    //must be greater than t and t_m
     t_f:f64
 )->f64{
     let exp_d=1.0-(-a*(t_f-t_m)).exp();
@@ -84,6 +98,20 @@ fn phi_t(
     forward_curve(t)+(sigma*exp_t).powi(2)/(2.0*a.powi(2))
 }
 
+/// Returns expectation of the interest rate process under the 
+/// risk neutral measure.
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start taking the expectation
+/// let t_m = 2.0; //horizon of the expectation
+/// let forward_curve = |t:f64|t.ln();
+/// let expected_value = hull_white::mu_r(r_t, a, sigma, t, t_m, &forward_curve);
+/// ```
 pub fn mu_r(
     r_t:f64,
     a:f64,
@@ -96,7 +124,17 @@ pub fn mu_r(
         a, sigma, t, forward_curve
     ))*(-a*(t_m-t)).exp()
 }
-
+/// Returns variance of the interest rate process
+///
+/// # Examples
+///
+/// ```
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start taking the variance
+/// let t_m = 2.0; //horizon of the variance
+/// let variance = hull_white::variance_r(a, sigma, t, t_m);
+/// ```
 pub fn variance_r(
     a:f64,
     sigma:f64,
@@ -106,8 +144,20 @@ pub fn variance_r(
     sigma.powi(2)*(1.0-(-2.0*a*(t_m-t)).exp())/(2.0*a)
 }
 
-
-
+/// Returns price of a bond at some future date
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let bond_maturity = 2.0; 
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "row" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let bond_price = hull_white::bond_price_t(r_t, a, sigma, t, bond_maturity, &yield_curve, &forward_curve);
+/// ```
 pub fn bond_price_t(
     r_t:f64,
     a:f64,
