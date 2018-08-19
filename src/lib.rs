@@ -1,3 +1,16 @@
+//! This is a library of fixed income pricers using a 
+//! Hull White process as the underlying process.  The 
+//! fundamental times here are (0, t, T, TM).  0 is the
+//! current time (and is  reflective of the current 
+//! yield  curve) while t is some future time  that we may 
+//! want to price options at given the underlying at 
+//! that time.  T and TM are shorthands for a variety of 
+//! asset times.  For example, an option on a bond requires
+//! an option maturity and a bond maturity.  The option
+//! maturity should be before the bond maturity, but after
+//! the future time t.  Note that ALL TIMES ARE WITH 
+//! RESPECT TO 0! 
+//!  
 extern crate nrfind;
 extern crate black_scholes;
 extern crate binomial_tree;
@@ -14,22 +27,6 @@ use rand::{SeedableRng, StdRng};
 use rand::distributions::StandardNormal;
 #[cfg(test)]
 use rand::distributions::{Distribution};
-/**
- * Note: the fundamental times 
- * here are (0, t, T, TM).  0 is 
- * current time (and is 
- * reflective of the current yield 
- * curve), t is some future time 
- * that we may want to price 
- * options at given the underlying 
- * at that time, T is an "initial" 
- * maturity and TM a "Final" 
- * maturity.  While it is natural 
- * to think of (0<t<T<TM), I only 
- * require 0<t and 0<T<TM.
- *  Note that ALL TIMES ARE WITH 
- * RESPECT TO 0!  
- * */
 
 const PREC_1:f64=0.0000001;
 const R_INIT:f64=0.03;
@@ -1300,8 +1297,12 @@ fn american_swaption(
     )
 }
 /// Returns price of an American payer swaption at some future time t
+/// 
+/// # Comments
+/// 
 /// This function uses a tree to solve and will take longer to compute
 /// than other pricing functions.
+/// 
 /// # Examples
 ///
 /// ```
@@ -1345,8 +1346,12 @@ pub fn american_payer_swaption_t(
     )
 }
 /// Returns price of an American receiver swaption at some future time t
+/// 
+/// # Comments
+/// 
 /// This function uses a tree to solve and will take longer to compute
 /// than other pricing functions.
+/// 
 /// # Examples
 ///
 /// ```
