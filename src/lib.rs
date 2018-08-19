@@ -383,12 +383,12 @@ pub fn coupon_bond_price_now(
 /// let a = 0.2; //speed of mean reversion for underlying Hull White process
 /// let sigma = 0.3; //volatility of underlying Hull White process
 /// let t = 1.0; //time from "now" (0) to start valuing the bond
-/// let option_maturity=1.5;
+/// let option_maturity = 1.5;
 /// let bond_maturity = 2.0; 
-/// let strike=0.98;
+/// let strike = 0.98;
 /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
 /// let forward_curve = |t:f64|t.ln();
-/// let bond_price = hull_white::bond_call_t(
+/// let bond_call = hull_white::bond_call_t(
 ///     r_t, a, sigma, t, 
 ///     option_maturity, bond_maturity,
 ///     strike, 
@@ -420,11 +420,11 @@ pub fn bond_call_t(
 /// ```
 /// let a = 0.2; //speed of mean reversion for underlying Hull White process
 /// let sigma = 0.3; //volatility of underlying Hull White process
-/// let option_maturity=1.5;
+/// let option_maturity = 1.5;
 /// let bond_maturity = 2.0; 
-/// let strike=0.98;
+/// let strike = 0.98;
 /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-/// let bond_price = hull_white::bond_call_now(
+/// let bond_call = hull_white::bond_call_now(
 ///      a, sigma,  
 ///     option_maturity, bond_maturity,
 ///     strike, 
@@ -526,7 +526,30 @@ fn coupon_bond_option_generic_t(
         }
     )
 }
-
+/// Returns price of a call option on a coupon bond at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity = 1.5;
+/// let coupon_times = vec![1.25, 1.5, 1.75, 2.0, 2.5];
+/// let bond_maturity = 3.0; 
+/// let coupon_rate = 0.05;
+/// let strike = 1.0;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let bond_call = hull_white::coupon_bond_call_t(
+///     r_t, a, sigma, t, 
+///     option_maturity, 
+///     &coupon_times, bond_maturity,
+///     coupon_rate, strike, 
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn coupon_bond_call_t(
     r_t:f64,
     a:f64,
@@ -551,7 +574,27 @@ pub fn coupon_bond_call_t(
         &bond_call_t
     )
 }
-
+/// Returns price of a put option on zero coupon bond at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity = 1.5;
+/// let bond_maturity = 2.0; 
+/// let strike = 0.98;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let put_price = hull_white::bond_put_t(
+///     r_t, a, sigma, t, 
+///     option_maturity, bond_maturity,
+///     strike, 
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn bond_put_t(
     r_t:f64,
     a:f64,
@@ -570,7 +613,24 @@ pub fn bond_put_t(
         t_forward_bond_vol(a, sigma, t, option_maturity, bond_maturity) //volatility with maturity
     )
 }
-
+/// Returns price of a put option on zero coupon bond at current time
+///
+/// # Examples
+///
+/// ```
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let option_maturity = 1.5;
+/// let bond_maturity = 2.0; 
+/// let strike = 0.98;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let put_price = hull_white::bond_put_now(
+///      a, sigma,  
+///     option_maturity, bond_maturity,
+///     strike, 
+///     &yield_curve
+/// );
+/// ```
 pub fn bond_put_now(
     a:f64,
     sigma:f64,
@@ -587,6 +647,30 @@ pub fn bond_put_now(
     )
 }
 
+/// Returns price of a put option on a coupon bond at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity = 1.5;
+/// let coupon_times = vec![1.25, 1.5, 1.75, 2.0, 2.5];
+/// let bond_maturity = 3.0; 
+/// let strike = 1.0;
+/// let coupon_rate = 0.05;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let put_price = hull_white::coupon_bond_put_t(
+///     r_t, a, sigma, t, 
+///     option_maturity, 
+///     &coupon_times, bond_maturity,
+///     coupon_rate, strike, 
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn coupon_bond_put_t(
     r_t:f64,
     a:f64,
@@ -612,8 +696,24 @@ pub fn coupon_bond_put_t(
     )
 }
 
-//equivalent to an option on a bond
-//t=0
+/// Returns price of a caplet at current time
+///
+/// # Examples
+///
+/// ```
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let option_maturity = 1.5;
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let strike = 0.04;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let caplet = hull_white::caplet_now(
+///     a, sigma,  
+///     option_maturity, delta,
+///     strike, 
+///     &yield_curve
+/// );
+/// ```
 pub fn caplet_now(
     a:f64,
     sigma:f64,
@@ -629,7 +729,27 @@ pub fn caplet_now(
         yield_curve
     )
 }
-
+/// Returns price of a caplet at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity = 1.5;
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let strike = 0.04;
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let caplet = hull_white::caplet_t(
+///     r_t, a, sigma, t, 
+///     option_maturity, delta,
+///     strike, 
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn caplet_t(
     r_t:f64,
     a:f64,
@@ -671,6 +791,25 @@ fn edf_compute(
 )->f64{
     ((bond_num/bond_den)*gamma.exp()-1.0)/delta
 }
+/// Returns price of a Euro Dollar Future at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity = 1.5;
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let edf = hull_white::euro_dollar_future_t(
+///     r_t, a, sigma, t, 
+///     option_maturity, delta,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn euro_dollar_future_t(
     r_t:f64,
     a:f64,
@@ -701,6 +840,22 @@ pub fn euro_dollar_future_t(
         delta
     )
 }
+/// Returns price of a Euro Dollar Future at current time
+///
+/// # Examples
+///
+/// ```
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let option_maturity = 1.5;
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let edf = hull_white::euro_dollar_future_now(
+///     a, sigma, 
+///     option_maturity, delta,
+///     &yield_curve
+/// );
+/// ```
 pub fn euro_dollar_future_now(
     a:f64,
     sigma:f64,
@@ -730,6 +885,25 @@ fn compute_libor_rate(
 )->f64{
     (nearest_bond-farthest_bond)/(farthest_bond*tenor)
 }
+/// Returns forward Libor rate at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let maturity = 1.5;
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let forward_libor = hull_white::forward_libor_rate_t(
+///     r_t, a, sigma, t, 
+///     maturity, delta,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn forward_libor_rate_t(
     r_t:f64,
     a:f64,
@@ -752,6 +926,19 @@ pub fn forward_libor_rate_t(
     );
     compute_libor_rate(nearest_bond, farthest_bond, delta)
 }
+/// Returns forward Libor rate at current time
+///
+/// # Examples
+///
+/// ```
+/// let maturity = 1.5;
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_libor = hull_white::forward_libor_rate_now(
+///     maturity, delta,
+///     &yield_curve
+/// );
+/// ```
 pub fn forward_libor_rate_now(
     maturity:f64,
     delta:f64, //tenor of simple yield
@@ -761,6 +948,24 @@ pub fn forward_libor_rate_now(
     let farthest_bond=bond_price_now(maturity+delta, &yield_curve);
     compute_libor_rate(nearest_bond, farthest_bond, delta)
 }
+/// Returns Libor rate at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let libor = hull_white::libor_rate_t(
+///     r_t, a, sigma, t, 
+///     delta,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn libor_rate_t(
     r_t:f64,
     a:f64,
@@ -787,7 +992,27 @@ fn get_num_payments(
 }
 
 
-
+/// Returns forward swap rate at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let swap_initiation = 1.5;
+/// let swap_maturity = 5.0; 
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let forward_swap = hull_white::forward_swap_rate_t(
+///     r_t, a, sigma, t, 
+///     swap_initiation, swap_maturity,
+///     delta,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn forward_swap_rate_t(
     r_t:f64,
     a:f64,
@@ -805,6 +1030,27 @@ pub fn forward_swap_rate_t(
     })*delta;
     (bond_price_t(r_t, a, sigma, t, swap_initiation, yield_curve, forward_curve)-bond_price_t(r_t, a, sigma, t, swap_maturity+delta, yield_curve, forward_curve))/denominator_swap
 } 
+
+/// Returns swap rate at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let swap_maturity = 5.0; 
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let swap_rate = hull_white::swap_rate_t(
+///     r_t, a, sigma, t, 
+///     swap_maturity,
+///     delta,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn swap_rate_t(
     r_t:f64,
     a:f64,
@@ -825,6 +1071,27 @@ pub fn swap_rate_t(
     )
 } 
 
+/// Returns price of a swap at some future time
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let swap_maturity = 5.0; 
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let swap_rate = 0.04; //at initiation, the swap rate is such that the swap has zero value
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let swap = hull_white::swap_price_t(
+///     r_t, a, sigma, t, 
+///     swap_maturity,
+///     delta, swap_rate,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn swap_price_t(
     r_t:f64,
     a:f64,
@@ -869,7 +1136,28 @@ fn get_coupon_times(
         get_time_from_t_index(index, t, delta)
     }).collect()
 }
-
+/// Returns price of a payer swaption at some future time t
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity = 2.0;
+/// let swap_tenor = 4.0; //swap_tenor is how long the swap will be once entered in
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let swaption = hull_white::european_payer_swaption_t(
+///     r_t, a, sigma, t, 
+///     swap_tenor, option_maturity,
+///     delta, swap_rate,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn european_payer_swaption_t(
     r_t:f64,
     a:f64,
@@ -895,7 +1183,28 @@ pub fn european_payer_swaption_t(
         forward_curve
     ) //swaption is equal to put on coupon bond with coupon=swaption swapRate*delta and strike 1.
 }
-
+/// Returns price of a receiver swaption at some future time t
+///
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity = 2.0;
+/// let swap_tenor = 4.0; //swap_tenor is how long the swap will be once entered in
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let swap_rate = 0.04; //the swap rate is what the receiver agrees to be paid if option is exercised
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let swaption = hull_white::european_receiver_swaption_t(
+///     r_t, a, sigma, t, 
+///     swap_tenor, option_maturity,
+///     delta, swap_rate,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn european_receiver_swaption_t(
     r_t:f64,
     a:f64,
@@ -990,7 +1299,30 @@ fn american_swaption(
         num_steps
     )
 }
-
+/// Returns price of an American payer swaption at some future time t
+/// This function uses a tree to solve and will take longer to compute
+/// than other pricing functions.
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity = 2.0;
+/// let swap_tenor = 4.0; //swap_tenor is how long the swap will be once entered in
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let num_tree_steps = 100;
+/// let swaption = hull_white::american_payer_swaption_t(
+///     r_t, a, sigma, t, 
+///     swap_tenor, option_maturity,
+///     delta, swap_rate, num_tree_steps,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn american_payer_swaption_t(
     r_t:f64,
     a:f64,
@@ -1012,7 +1344,30 @@ pub fn american_payer_swaption_t(
         yield_curve, forward_curve
     )
 }
-
+/// Returns price of an American receiver swaption at some future time t
+/// This function uses a tree to solve and will take longer to compute
+/// than other pricing functions.
+/// # Examples
+///
+/// ```
+/// let r_t = 0.04; //current rate
+/// let a = 0.2; //speed of mean reversion for underlying Hull White process
+/// let sigma = 0.3; //volatility of underlying Hull White process
+/// let t = 1.0; //time from "now" (0) to start valuing the bond
+/// let option_maturity = 2.0;
+/// let swap_tenor = 4.0; //swap_tenor is how long the swap will be once entered in
+/// let delta = 0.25; //delta is the tenor of the Libor rate
+/// let swap_rate = 0.04; //the swap rate is what the receiver agrees to be paid if option is exercised
+/// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
+/// let forward_curve = |t:f64|t.ln();
+/// let num_tree_steps = 100;
+/// let swaption = hull_white::american_receiver_swaption_t(
+///     r_t, a, sigma, t, 
+///     swap_tenor, option_maturity,
+///     delta, swap_rate, num_tree_steps,
+///     &yield_curve, &forward_curve
+/// );
+/// ```
 pub fn american_receiver_swaption_t(
     r_t:f64,
     a:f64,
