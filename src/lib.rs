@@ -11,22 +11,8 @@
 //! the future time t.  Note that ALL TIMES ARE WITH
 //! RESPECT TO 0!
 //!  
-extern crate binomial_tree;
-extern crate black_scholes;
-extern crate nrfind;
 
-#[macro_use]
-#[cfg(test)]
-extern crate approx;
 
-#[cfg(test)]
-extern crate rand;
-#[cfg(test)]
-use rand::distributions::Distribution;
-#[cfg(test)]
-use rand::distributions::StandardNormal;
-#[cfg(test)]
-use rand::{SeedableRng, StdRng};
 
 const PREC_1: f64 = 0.0000001;
 const R_INIT: f64 = 0.03;
@@ -1494,6 +1480,9 @@ fn european_swaption_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::distributions::{Distribution, StandardNormal};
+    use rand::{SeedableRng, StdRng};
+    use approx::*;
     fn get_rng_seed(seed: [u8; 32]) -> StdRng {
         SeedableRng::from_seed(seed)
     }
