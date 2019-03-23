@@ -23,5 +23,5 @@ The documentation is written in [R Sweave](https://www.r-bloggers.com/getting-st
 
 Add the following package to your Cargo.toml:
 
-`hull_white = "0.3.3"`
+`hull_white = "0.5.0"`
 

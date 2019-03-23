@@ -1,6 +1,6 @@
 [package]
 name = "hull_white"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Daniel Stahl <danstahl1138@gmail.com>"]
 homepage = "https://github.com/phillyfan1138/hull_white_rust"
 repository = "https://github.com/phillyfan1138/hull_white_rust"
@@ -11,7 +11,7 @@ edition = "2018"
 
 [dependencies]
 nrfind = "1.0.2"
-black_scholes = "0.2.7"
+black_scholes = "0.5.0"
 binomial_tree = "0.4.0"
 
 [dev-dependencies]
