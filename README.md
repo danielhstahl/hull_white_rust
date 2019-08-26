@@ -7,7 +7,7 @@
 [cov-badge]: https://codecov.io/gh/phillyfan1138/hull_white_rust/branch/master/graph/badge.svg
 [cov-link]:  https://codecov.io/gh/phillyfan1138/hull_white_rust
 
-## Hull White 
+## Hull White
 
 This library implements functions that price fixed income products assuming that short rates follow a Hull-White process.
 
@@ -17,7 +17,7 @@ The [Documentation](./documentation) holds the model documentation for the vario
 
 ## Requirements
 
-The documentation is written in [R Sweave](https://www.r-bloggers.com/getting-started-with-sweave-r-latex-eclipse-statet-texlipse/).  The application is written in [Rust](https://www.rust-lang.org/en-US/). 
+The documentation is written in [R Sweave](https://www.r-bloggers.com/getting-started-with-sweave-r-latex-eclipse-statet-texlipse/).  The application is written in [Rust](https://www.rust-lang.org/en-US/).
 
 ## Install
 
@@ -25,3 +25,6 @@ Add the following package to your Cargo.toml:
 
 `hull_white = "0.5.0"`
 
+## Benchmarks
+
+Benchmarks are at https://github.com/phillyfan1138/hull_white_rust
