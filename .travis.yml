@@ -1,9 +1,5 @@
 language: rust
 sudo: required
-rust:
-- stable
-- beta
-- nightly
 
 addons:
   apt:
@@ -15,18 +11,38 @@ addons:
     - gcc
     - binutils-dev
     - libiberty-dev
+    - gnuplot
 before_cache: |
   if [ "$TRAVIS_RUST_VERSION" = "nightly" ]; then
     RUSTFLAGS="--cfg procmacro2_semver_exempt" cargo install cargo-tarpaulin
   fi
-
+#env:
+#  matrix:
+ #   secure: jAy7kUNaoPSXm322NtUBAZHqRggW312k2aR0QpbAPIklYFNouaqh4HZrD7CVXBFXgis88Xt7AmI7kquKO1daxdjo1Ur5CCXDAnY22fal6qhHbKU8WMkbBw7rLa/NZfG/miD+joIJThrmYO8ZB76GKMVVBf1X1wP60TpQodNcrb+7O96AB8j3gj7Ay4nJIqvWfXaKt/9z33HUoKc4h0wpkoAHgyYBNruVWVrlEyCZk/ZovVQdU+1NXRJRx9NbwEPedATgh94+0VBw/L3382keImBV0MMc/piUnf0htAVhvmi/rxke6MBM2+C5+G/xcYhJrtvMgkUv9yyCLfAZ83ebZZCxy0RkThdor6EWbZMratnJl0g8wILfGocv1XcB2uk89/4HyFwZ4MFfzf4MKhV4sgk0vhb9UCGLY+JmYzXo5V8/50BQ4O0LajHJgwrghgYLUjmAATSdED44j+BoNrQhCwxU2oeWh9lcicl9EvayV/V/pB2t1pD7nkFLglYXjVnwk8CCay7/KfXdTkXQLsA8oLOE+d0n4txH5VdNHS8fvCByTV4Fqx9Wc9EkQ3zhUkvnPfrrhqXFmkQg9SKTqBNEX+eGAvo43BreGV+EqE9MVj/lDSLFfctFbXIw4OUxgwyQ28uBcY20j9Juxqi6GyDTZjQustrMEePTBH5NFcez4hE=
 after_success: |
   if [ "$TRAVIS_RUST_VERSION" = "nightly" ]; then
     cargo tarpaulin --out Xml
     bash <(curl -s https://codecov.io/bash)
+  fi
+  if [ "$TRAVIS_RUST_VERSION" = stable ]; then
+    cargo bench
     cargo doc
     cargo publish --token "$CARGO_API" --allow-dirty
   fi
-env:
-  matrix:
-    secure: jAy7kUNaoPSXm322NtUBAZHqRggW312k2aR0QpbAPIklYFNouaqh4HZrD7CVXBFXgis88Xt7AmI7kquKO1daxdjo1Ur5CCXDAnY22fal6qhHbKU8WMkbBw7rLa/NZfG/miD+joIJThrmYO8ZB76GKMVVBf1X1wP60TpQodNcrb+7O96AB8j3gj7Ay4nJIqvWfXaKt/9z33HUoKc4h0wpkoAHgyYBNruVWVrlEyCZk/ZovVQdU+1NXRJRx9NbwEPedATgh94+0VBw/L3382keImBV0MMc/piUnf0htAVhvmi/rxke6MBM2+C5+G/xcYhJrtvMgkUv9yyCLfAZ83ebZZCxy0RkThdor6EWbZMratnJl0g8wILfGocv1XcB2uk89/4HyFwZ4MFfzf4MKhV4sgk0vhb9UCGLY+JmYzXo5V8/50BQ4O0LajHJgwrghgYLUjmAATSdED44j+BoNrQhCwxU2oeWh9lcicl9EvayV/V/pB2t1pD7nkFLglYXjVnwk8CCay7/KfXdTkXQLsA8oLOE+d0n4txH5VdNHS8fvCByTV4Fqx9Wc9EkQ3zhUkvnPfrrhqXFmkQg9SKTqBNEX+eGAvo43BreGV+EqE9MVj/lDSLFfctFbXIw4OUxgwyQ28uBcY20j9Juxqi6GyDTZjQustrMEePTBH5NFcez4hE=
+matrix:
+  include:
+  - rust: stable
+    env:
+    - secure: jAy7kUNaoPSXm322NtUBAZHqRggW312k2aR0QpbAPIklYFNouaqh4HZrD7CVXBFXgis88Xt7AmI7kquKO1daxdjo1Ur5CCXDAnY22fal6qhHbKU8WMkbBw7rLa/NZfG/miD+joIJThrmYO8ZB76GKMVVBf1X1wP60TpQodNcrb+7O96AB8j3gj7Ay4nJIqvWfXaKt/9z33HUoKc4h0wpkoAHgyYBNruVWVrlEyCZk/ZovVQdU+1NXRJRx9NbwEPedATgh94+0VBw/L3382keImBV0MMc/piUnf0htAVhvmi/rxke6MBM2+C5+G/xcYhJrtvMgkUv9yyCLfAZ83ebZZCxy0RkThdor6EWbZMratnJl0g8wILfGocv1XcB2uk89/4HyFwZ4MFfzf4MKhV4sgk0vhb9UCGLY+JmYzXo5V8/50BQ4O0LajHJgwrghgYLUjmAATSdED44j+BoNrQhCwxU2oeWh9lcicl9EvayV/V/pB2t1pD7nkFLglYXjVnwk8CCay7/KfXdTkXQLsA8oLOE+d0n4txH5VdNHS8fvCByTV4Fqx9Wc9EkQ3zhUkvnPfrrhqXFmkQg9SKTqBNEX+eGAvo43BreGV+EqE9MVj/lDSLFfctFbXIw4OUxgwyQ28uBcY20j9Juxqi6GyDTZjQustrMEePTBH5NFcez4hE=
+    - secure: h+0yoPGLr17BnIstAxYlawFTFMS4SpddQAodEl+pGForVHoi1JVhdQqlWnQMyNkPXlw4cbHDyh/XW1fEJu7RHTvik/hWOpVeVO4Y/3lz1xNVK9v3qDiEeLFKj1V1ZqkfjG/wYhPdzLPOlbWTMyXuuh9okVNp2JCDTN+n2E+zi1PK+1wUUMM694xRGWNQMI3XSZGZxSoqbEFEbKcS/SNgDP6Wj0psDoEPOCAW+aIetRMPBqkfkM2ItmeSS/uJ/IFHwurLHFxdKd4OMgRfNnFzXTyf9MVl7LEXNbupQUOGdO632piliRJnhk6mbF38zYdKwH1xQqhAppNOqkR9rYsVD0J2KKq2wCRPEqHYLP0D2S1oIerCwFdjFlUZtQc2UwdWZ2i146j/LrTaZLwTGeFpt9vLCMgz/07JhLJdNB8FrOdVGCj1B0gKPYIFdwbNeOcQWnNtCCr1VxcL02V1NURL1kNMR5MLyAZEClW5PusGb+fKg8p57XDhe31CSwQY3eWOFInrRMC114KGjDzRuBw9pBCC18kA52aq4ihjHCemuUeKJF0QECbdYSpjWRot0M+rsUvUaS7V169n23DIxHCnXBEQDMYcaLRbKNRO2Jo7wVv/qQgdYLdpjRbTri902s/swfezBipLCpX/ydg0YnXpWLDU9edGmzNTuYtZhN5+tpw=
+  - rust: nightly
+  - rust: beta
+deploy:
+  provider: pages
+  skip_cleanup: true
+  github_token: "$GITHUB_TOKEN"
+  keep_history: true
+  local_dir: target/criterion
+  on:
+    branch: master
+    rust: stable

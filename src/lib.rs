@@ -10,7 +10,7 @@
 //! maturity should be before the bond maturity, but after
 //! the future time t.  Note that ALL TIMES ARE WITH
 //! RESPECT TO 0!
-//!  
+//!
 
 
 
@@ -34,8 +34,8 @@ fn ct_t(
     sigma: f64,
     t: f64,
     t_m: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let sqr = (-a * t_m).exp() - (-a * t).exp();
     yield_curve(t) - yield_curve(t_m) + forward_curve(t) * at_t(a, t, t_m)
@@ -72,7 +72,7 @@ pub fn t_forward_bond_vol(
     sigma * (exp_t / (2.0 * a.powi(3))).sqrt() * exp_d
 }
 
-fn phi_t(a: f64, sigma: f64, t: f64, forward_curve: &Fn(f64) -> f64) -> f64 {
+fn phi_t(a: f64, sigma: f64, t: f64, forward_curve: &dyn Fn(f64) -> f64) -> f64 {
     let exp_t = 1.0 - (-a * t).exp();
     forward_curve(t) + (sigma * exp_t).powi(2) / (2.0 * a.powi(2))
 }
@@ -95,7 +95,7 @@ fn phi_t(a: f64, sigma: f64, t: f64, forward_curve: &Fn(f64) -> f64) -> f64 {
 ///     &forward_curve
 /// );
 /// ```
-pub fn mu_r(r_t: f64, a: f64, sigma: f64, t: f64, t_m: f64, forward_curve: &Fn(f64) -> f64) -> f64 {
+pub fn mu_r(r_t: f64, a: f64, sigma: f64, t: f64, t_m: f64, forward_curve: &dyn Fn(f64) -> f64) -> f64 {
     phi_t(a, sigma, t_m, forward_curve)
         + (r_t - phi_t(a, sigma, t, forward_curve)) * (-a * (t_m - t)).exp()
 }
@@ -137,8 +137,8 @@ pub fn bond_price_t(
     sigma: f64,
     t: f64,
     bond_maturity: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     (-r_t * at_t(a, t, bond_maturity)
         + ct_t(a, sigma, t, bond_maturity, yield_curve, forward_curve))
@@ -152,8 +152,8 @@ fn bond_price_t_deriv(
     sigma: f64,
     t: f64,
     bond_maturity: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let at_t_c = at_t(a, t, bond_maturity);
     -(-r_t * at_t_c + ct_t(a, sigma, t, bond_maturity, yield_curve, forward_curve)).exp() * at_t_c
@@ -171,7 +171,7 @@ fn bond_price_t_deriv(
 ///     &yield_curve
 /// );
 /// ```
-pub fn bond_price_now(bond_maturity: f64, yield_curve: &Fn(f64) -> f64) -> f64 {
+pub fn bond_price_now(bond_maturity: f64, yield_curve: &dyn Fn(f64) -> f64) -> f64 {
     (-yield_curve(bond_maturity)).exp()
 }
 
@@ -183,9 +183,9 @@ fn coupon_bond_generic_t(
     coupon_times: &[f64], //does not include the bond_maturity, but the function does check for that
     bond_maturity: f64,
     coupon_rate: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
-    generic_fn: &Fn(f64, f64, f64, f64, f64, &Fn(f64) -> f64, &Fn(f64) -> f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
+    generic_fn: &dyn Fn(f64, f64, f64, f64, f64, &dyn Fn(f64) -> f64, &dyn Fn(f64) -> f64) -> f64,
 ) -> f64 {
     let par_value = 1.0; //without loss of generality
     let final_payment = generic_fn(r_t, a, sigma, t, bond_maturity, yield_curve, forward_curve)
@@ -207,8 +207,8 @@ fn coupon_bond_generic_now(
     coupon_times: &[f64], //does not include the bond_maturity, but the function does check for that
     bond_maturity: f64,
     coupon_rate: f64,
-    yield_curve: &Fn(f64) -> f64,
-    generic_fn: &Fn(f64, &Fn(f64) -> f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    generic_fn: &dyn Fn(f64, &dyn Fn(f64) -> f64) -> f64,
 ) -> f64 {
     let par_value = 1.0; //without loss of generality
     let final_payment = generic_fn(bond_maturity, yield_curve) * (par_value + coupon_rate); //par of one+coupon rate
@@ -252,8 +252,8 @@ pub fn coupon_bond_price_t(
     coupon_times: &[f64], //does not include the bond_maturity, but the function does check for that
     bond_maturity: f64,
     coupon_rate: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     coupon_bond_generic_t(
         r_t,
@@ -277,8 +277,8 @@ fn coupon_bond_price_t_deriv(
     coupon_times: &[f64], //does not include the bond_maturity, but the function does check for that
     bond_maturity: f64,
     coupon_rate: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     coupon_bond_generic_t(
         r_t,
@@ -312,7 +312,7 @@ pub fn coupon_bond_price_now(
     coupon_times: &[f64], //does not include the bond_maturity, but the function does check for that
     bond_maturity: f64,
     coupon_rate: f64,
-    yield_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     coupon_bond_generic_now(
         coupon_times,
@@ -351,8 +351,8 @@ pub fn bond_call_t(
     option_maturity: f64,
     bond_maturity: f64,
     strike: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     black_scholes::call_discount(
         bond_price_t(r_t, a, sigma, t, bond_maturity, yield_curve, forward_curve), //underlying
@@ -381,7 +381,7 @@ pub fn bond_call_t(
 /// let strike = 0.98;
 /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
 /// let bond_call = hull_white::bond_call_now(
-///      a, sigma,  
+///      a, sigma,
 ///     option_maturity, bond_maturity,
 ///     strike,
 ///     &yield_curve
@@ -393,7 +393,7 @@ pub fn bond_call_now(
     option_maturity: f64,
     bond_maturity: f64,
     strike: f64,
-    yield_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let t = 0.0; //since "now"
     black_scholes::call_discount(
@@ -414,9 +414,9 @@ fn coupon_bond_option_generic_t(
     bond_maturity: f64,
     coupon_rate: f64,
     strike: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
-    generic_fn: &Fn(f64, f64, f64, f64, f64, f64, f64, &Fn(f64) -> f64, &Fn(f64) -> f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
+    generic_fn: &dyn Fn(f64, f64, f64, f64, f64, f64, f64, &dyn Fn(f64) -> f64, &dyn Fn(f64) -> f64) -> f64,
 ) -> f64 {
     let par_value = 1.0;
     let fn_to_optimize = |r| {
@@ -530,8 +530,8 @@ pub fn coupon_bond_call_t(
     bond_maturity: f64,
     coupon_rate: f64,
     strike: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     coupon_bond_option_generic_t(
         r_t,
@@ -577,8 +577,8 @@ pub fn bond_put_t(
     option_maturity: f64,
     bond_maturity: f64,
     strike: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     black_scholes::put_discount(
         bond_price_t(r_t, a, sigma, t, bond_maturity, yield_curve, forward_curve), //underlying
@@ -607,7 +607,7 @@ pub fn bond_put_t(
 /// let strike = 0.98;
 /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
 /// let put_price = hull_white::bond_put_now(
-///      a, sigma,  
+///      a, sigma,
 ///     option_maturity, bond_maturity,
 ///     strike,
 ///     &yield_curve
@@ -619,7 +619,7 @@ pub fn bond_put_now(
     option_maturity: f64,
     bond_maturity: f64,
     strike: f64,
-    yield_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     black_scholes::put_discount(
         bond_price_now(bond_maturity, yield_curve), //underlying
@@ -663,8 +663,8 @@ pub fn coupon_bond_put_t(
     bond_maturity: f64,
     coupon_rate: f64,
     strike: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     coupon_bond_option_generic_t(
         r_t,
@@ -694,7 +694,7 @@ pub fn coupon_bond_put_t(
 /// let strike = 0.04;
 /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
 /// let caplet = hull_white::caplet_now(
-///     a, sigma,  
+///     a, sigma,
 ///     option_maturity, delta,
 ///     strike,
 ///     &yield_curve
@@ -706,7 +706,7 @@ pub fn caplet_now(
     option_maturity: f64,
     delta: f64, //tenor of the simple yield
     strike: f64,
-    yield_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     (strike * delta + 1.0)
         * bond_put_now(
@@ -747,8 +747,8 @@ pub fn caplet_t(
     option_maturity: f64,
     delta: f64, //tenor of simple yield
     strike: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     (strike * delta + 1.0)
         * bond_put_t(
@@ -801,8 +801,8 @@ pub fn euro_dollar_future_t(
     t: f64,
     option_maturity: f64,
     delta: f64, //tenor of simple yield
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let gamma = gamma_edf(a, sigma, t, option_maturity, delta);
     edf_compute(
@@ -849,7 +849,7 @@ pub fn euro_dollar_future_now(
     sigma: f64,
     option_maturity: f64,
     delta: f64, //tenor of simple yield
-    yield_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let gamma = gamma_edf(a, sigma, 0.0, option_maturity, delta);
     edf_compute(
@@ -889,8 +889,8 @@ pub fn forward_libor_rate_t(
     t: f64,
     maturity: f64,
     delta: f64, //tenor of simple yield
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let nearest_bond = bond_price_t(r_t, a, sigma, t, maturity, &yield_curve, &forward_curve);
     let farthest_bond = bond_price_t(
@@ -920,7 +920,7 @@ pub fn forward_libor_rate_t(
 pub fn forward_libor_rate_now(
     maturity: f64,
     delta: f64, //tenor of simple yield
-    yield_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let nearest_bond = bond_price_now(maturity, &yield_curve);
     let farthest_bond = bond_price_now(maturity + delta, &yield_curve);
@@ -950,8 +950,8 @@ pub fn libor_rate_t(
     sigma: f64,
     t: f64,
     delta: f64, //tenor of simple yield
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     forward_libor_rate_t(r_t, a, sigma, t, t, delta, yield_curve, forward_curve)
 }
@@ -989,8 +989,8 @@ pub fn forward_swap_rate_t(
     swap_initiation: f64,
     swap_maturity: f64,
     delta: f64, //tenor of simple yield
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let num_payments = get_num_payments(swap_initiation, swap_maturity, delta) as usize; //this should be an integer!  remember, T-t is the total swap length
     let denominator_swap = (1..(num_payments + 1)).fold(0.0, |accum, curr| {
@@ -1051,8 +1051,8 @@ pub fn swap_rate_t(
     t: f64,
     swap_maturity: f64,
     delta: f64, //tenor of simple yield
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     forward_swap_rate_t(
         r_t,
@@ -1096,8 +1096,8 @@ pub fn swap_price_t(
     swap_maturity: f64,
     delta: f64, //tenor of simple yield
     swap_rate: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let num_payments_fl = get_num_payments(t, swap_maturity, delta); //this should be an integer!  remember, T-t is the total swap length
     let num_payments = num_payments_fl as usize;
@@ -1139,7 +1139,7 @@ pub fn swap_price_t(
 fn get_time_from_t_index(index: usize, t: f64, delta: f64) -> f64 {
     t + (index as f64) * delta
 }
-fn get_coupon_times(num_payments: usize, t: f64, delta: f64) -> Vec<f64> {
+pub fn get_coupon_times(num_payments: usize, t: f64, delta: f64) -> Vec<f64> {
     (1..(num_payments))
         .map(|index| get_time_from_t_index(index, t, delta))
         .collect()
@@ -1175,8 +1175,8 @@ pub fn european_payer_swaption_t(
     option_maturity: f64,
     delta: f64, //tenor of simple yield
     swap_rate: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let num_payments = get_num_payments(t, swap_tenor, delta) as usize;
     let coupon_times = get_coupon_times(num_payments, option_maturity, delta);
@@ -1226,8 +1226,8 @@ pub fn european_receiver_swaption_t(
     option_maturity: f64,
     delta: f64, //tenor of simple yield
     swap_rate: f64,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let num_payments = get_num_payments(t, swap_tenor, delta) as usize;
     let coupon_times = get_coupon_times(num_payments, option_maturity, delta);
@@ -1272,8 +1272,8 @@ fn american_swaption(
     swap_rate: f64,
     is_payer: bool,
     num_steps: usize,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let alpha_div_sigma =
         |_t_step: f64, curr_val: f64, _dt: f64, _width: usize| -(a * curr_val) / sigma;
@@ -1349,8 +1349,8 @@ pub fn american_payer_swaption_t(
     delta: f64, //tenor of simple yield
     swap_rate: f64,
     num_steps: usize,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let is_payer = true;
     american_swaption(
@@ -1406,8 +1406,8 @@ pub fn american_receiver_swaption_t(
     delta: f64, //tenor of simple yield
     swap_rate: f64,
     num_steps: usize,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let is_payer = false;
     american_swaption(
@@ -1437,8 +1437,8 @@ fn european_swaption_tree(
     swap_rate: f64,
     is_payer: bool,
     num_steps: usize,
-    yield_curve: &Fn(f64) -> f64,
-    forward_curve: &Fn(f64) -> f64,
+    yield_curve: &dyn Fn(f64) -> f64,
+    forward_curve: &dyn Fn(f64) -> f64,
 ) -> f64 {
     let alpha_div_sigma =
         |_t_step: f64, curr_val: f64, _dt: f64, _width: usize| -(a * curr_val) / sigma;
