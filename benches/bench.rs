@@ -167,7 +167,7 @@ fn bench_swaption_bond(c: &mut Criterion){
                 &forward_curve,
             )
         })
-    }, vec![100, 200, 500]).with_function("tree", move |b, i|{
+    }, vec![50, 100, 200]).with_function("tree", move |b, i|{
         b.iter(||{
             hull_white::american_payer_swaption_t(
                 curr_rate,
