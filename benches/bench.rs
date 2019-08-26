@@ -187,5 +187,5 @@ fn bench_swaption_bond(c: &mut Criterion){
 }
 
 
-criterion_group!(benches, bench_bond, bench_coupon_bond, bench_swaption_bond, bench_swap_rate);
+criterion_group!(benches, bench_bond, bench_coupon_bond, bench_swap_rate, bench_swaption_bond);
 criterion_main!(benches);
