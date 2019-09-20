@@ -16,7 +16,7 @@
 
 \section{Introduction}
 
-This model computes the prices of interest rate derivative securities.  The model is based off risk-neutral interest rates following a Hull-White model which can fit the initial yield curve exactly.  The real-world interest rate dynamics are assumed to follow a Vasicek (time-homogeneous Hull-White) process for simulation purposes.  This framework is chosen for two reasons: it is efficient in pricing a wide range of interest rate options and it provides a suitable first approximation to the risk that may be incurred from movements in interest rates.  Models that provide a better fit to market data (eg, the LIBOR Market Model) are not as flexible in pricing a variety of options.  Models that generalize to multi-dimensional processes (eg, multi-dimensional Hull-White) are more difficult to estimate and are often less efficient for pricing purposes.
+This model computes the prices of interest rate derivative securities.  The model is based off risk-neutral interest rates following a Hull-White model which can fit the initial yield curve exactly.  The real-world interest rate dynamics are assumed to follow a Vasicek (time-homogeneous Hull-White) process for simulation purposes.  This framework is chosen for two reasons: it is efficient in pricing a wide range of interest rate options and it provides a suitable first approximation to the risk that may be incurred from movements in interest rates.  Models that provide a better fit to market data (eg, the LIBOR Market Model) are not as flexible in pricing a variety of options.  Models that generalize to multi-dimensional processes (eg, multi-dimensional Hull-White) are more difficult to estimate and are often less computationally efficient for pricing.
 \\
 \\
 Inputs to each pricing model include a function representing the initial yield curve and initial forward rate curve.
@@ -91,9 +91,9 @@ Note that the volatility depends only on \(a\) and \(\sigma\) and hence these pa
 
 \subsection{Caplet pricing}
 From above, the price of a caplet is the following:
-\[c(t, T, \delta; k)=\mathbb{\tilde{E}}\left[D(t, T)\left(\frac{1}{\delta k+1}-B(T, T+\delta)\right)^+ |\mathcal{F}_t\right]\]
-\[=B(t, T)\mathbb{\hat{E}}\left[\left(\frac{1}{\delta k+1}-B(T, T+\delta)\right)^+ |\mathcal{F}_t\right]\]
-Where \(\hat{E}\) is the measure induced by \(B(t, T)\).
+\[c(t, T, \delta; k)=\left(k\delta+1\right)\mathbb{\tilde{E}}\left[D(t, T)\left(\frac{1}{\delta k+1}-B(T, T+\delta)\right)^+ |\mathcal{F}_t\right]\]
+\[=\left(k\delta+1\right)B(t, T)\mathbb{\hat{E}}\left[\left(\frac{1}{\delta k+1}-B(T, T+\delta)\right)^+ |\mathcal{F}_t\right]\]
+Where \(\hat{E}\) is the measure induced by \(B(t, T)\).  The forward measure can then be used to price the option.
 
 \subsection{Euro Dollar Futures}
 The future price satisfies \[\delta f(t, T; \delta)=\tilde{\mathbb{E}}\left[\frac{1}{B(T, T+\delta)}|\mathcal{F}_t\right]-1\]
