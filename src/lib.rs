@@ -12,8 +12,6 @@
 //! RESPECT TO 0!
 //!
 
-
-
 const PREC_1: f64 = 0.0000001;
 const R_INIT: f64 = 0.03;
 const MAX_ITER: i32 = 50;
@@ -95,7 +93,14 @@ fn phi_t(a: f64, sigma: f64, t: f64, forward_curve: &dyn Fn(f64) -> f64) -> f64 
 ///     &forward_curve
 /// );
 /// ```
-pub fn mu_r(r_t: f64, a: f64, sigma: f64, t: f64, t_m: f64, forward_curve: &dyn Fn(f64) -> f64) -> f64 {
+pub fn mu_r(
+    r_t: f64,
+    a: f64,
+    sigma: f64,
+    t: f64,
+    t_m: f64,
+    forward_curve: &dyn Fn(f64) -> f64,
+) -> f64 {
     phi_t(a, sigma, t_m, forward_curve)
         + (r_t - phi_t(a, sigma, t, forward_curve)) * (-a * (t_m - t)).exp()
 }
@@ -416,7 +421,17 @@ fn coupon_bond_option_generic_t(
     strike: f64,
     yield_curve: &dyn Fn(f64) -> f64,
     forward_curve: &dyn Fn(f64) -> f64,
-    generic_fn: &dyn Fn(f64, f64, f64, f64, f64, f64, f64, &dyn Fn(f64) -> f64, &dyn Fn(f64) -> f64) -> f64,
+    generic_fn: &dyn Fn(
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        &dyn Fn(f64) -> f64,
+        &dyn Fn(f64) -> f64,
+    ) -> f64,
 ) -> f64 {
     let par_value = 1.0;
     let fn_to_optimize = |r| {
@@ -1480,9 +1495,9 @@ fn european_swaption_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::*;
     use rand::distributions::{Distribution, StandardNormal};
     use rand::{SeedableRng, StdRng};
-    use approx::*;
     fn get_rng_seed(seed: [u8; 32]) -> StdRng {
         SeedableRng::from_seed(seed)
     }
