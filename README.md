@@ -2,10 +2,10 @@
 | :---------------: | :-------------------: |
 | ![lin-badge]      | ![cov-badge]          |
 
-[lin-badge]: https://github.com/phillyfan1138/hull_white_rust/workflows/Rust/badge.svg
-[lin-link]:  https://github.com/phillyfan1138/hull_white_rust/actions
-[cov-badge]: https://codecov.io/gh/phillyfan1138/hull_white_rust/branch/master/graph/badge.svg
-[cov-link]:  https://codecov.io/gh/phillyfan1138/hull_white_rust
+[lin-badge]: https://github.com/danielhstahl/hull_white_rust/workflows/Rust/badge.svg
+[lin-link]:  https://github.com/danielhstahl/hull_white_rust/actions
+[cov-badge]: https://codecov.io/gh/danielhstahl/hull_white_rust/branch/master/graph/badge.svg
+[cov-link]:  https://codecov.io/gh/phildanielhstahllyfan1138/hull_white_rust
 
 ## Hull White
 
@@ -27,4 +27,4 @@ Add the following package to your Cargo.toml:
 
 ## Benchmarks
 
-Benchmarks are at https://phillyfan1138.github.io/hull_white_rust/report/.
+Benchmarks are at https://danielhstahl.github.io/hull_white_rust/report/.

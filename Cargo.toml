@@ -2,8 +2,8 @@
 name = "hull_white"
 version = "0.5.0"
 authors = ["Daniel Stahl <danstahl1138@gmail.com>"]
-homepage = "https://github.com/phillyfan1138/hull_white_rust"
-repository = "https://github.com/phillyfan1138/hull_white_rust"
+homepage = "https://github.com/danielhstahl/hull_white_rust"
+repository = "https://github.com/danielhstahl/hull_white_rust"
 readme = "README.md"
 license = "MIT"
 description = "Pricing functions assuming a Hull White short rate"
