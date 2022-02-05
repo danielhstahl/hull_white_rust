@@ -43,42 +43,36 @@ fn ct_t(
 fn coupon_bond_generic_t(
     r_t: f64,
     t: f64,
-    coupon_times: &[f64], //does not include the bond_maturity, but the function does check for that
-    bond_maturity: f64,
+    coupon_times: &[f64], //includes bond_maturity
     coupon_rate: f64,
     generic_fn: &impl Fn(f64, f64, f64) -> f64,
 ) -> f64 {
     let par_value = 1.0; //without loss of generality
-    let final_payment = generic_fn(r_t, t, bond_maturity) * (par_value + coupon_rate); //par of one+coupon rate
+    let last_index_coupon = coupon_times.len() - 1;
     coupon_times
         .iter()
-        .fold(final_payment, |accum, coupon_time| {
-            if *coupon_time > t && *coupon_time < bond_maturity {
-                //check for whether includes bond maturity
-                accum + coupon_rate * generic_fn(r_t, t, *coupon_time)
-            } else {
-                accum
-            }
+        .enumerate()
+        .map(|(index, coupon_time)| {
+            let is_last = index == last_index_coupon;
+            (coupon_rate + if is_last { par_value } else { 0.0 }) * generic_fn(r_t, t, *coupon_time)
         })
+        .sum()
 }
 fn coupon_bond_generic_now(
-    coupon_times: &[f64], //does not include the bond_maturity, but the function does check for that
-    bond_maturity: f64,
+    coupon_times: &[f64], //includes bond_maturity
     coupon_rate: f64,
     generic_fn: &impl Fn(f64) -> f64,
 ) -> f64 {
     let par_value = 1.0; //without loss of generality
-    let final_payment = generic_fn(bond_maturity) * (par_value + coupon_rate); //par of one+coupon rate
+    let last_index_coupon = coupon_times.len() - 1;
     coupon_times
         .iter()
-        .fold(final_payment, |accum, coupon_time| {
-            if *coupon_time < bond_maturity {
-                //check for whether includes bond maturity
-                accum + coupon_rate * generic_fn(*coupon_time)
-            } else {
-                accum
-            }
+        .enumerate()
+        .map(|(index, coupon_time)| {
+            let is_last = index == last_index_coupon;
+            (coupon_rate + if is_last { par_value } else { 0.0 }) * generic_fn(*coupon_time)
         })
+        .sum()
 }
 pub struct HullWhite<'a> {
     a: f64,
@@ -230,27 +224,24 @@ impl HullWhite<'_> {
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let t = 1.0; //time from "now" (0) to start valuing the bond
-    /// let coupon_times = vec![1.25, 1.5, 1.75]; //should be between t and bond_maturity
-    /// let bond_maturity = 2.0;
+    /// let coupon_times = vec![1.25, 1.5, 1.75, 2.0]; //measure time from now (0), all should be greater than t.  Final coupon is the bond maturity
     /// let coupon_rate = 0.05;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
     /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
-    /// let bond_price = hull_white.coupon_bond_price_t(r_t, t, &coupon_times, bond_maturity, coupon_rate);
+    /// let bond_price = hull_white.coupon_bond_price_t(r_t, t, &coupon_times, coupon_rate);
     /// ```
     pub fn coupon_bond_price_t(
         &self,
         r_t: f64,
         t: f64,
         coupon_times: &[f64],
-        bond_maturity: f64,
         coupon_rate: f64,
     ) -> f64 {
         coupon_bond_generic_t(
             r_t,
             t,
             coupon_times,
-            bond_maturity,
             coupon_rate,
             &|r_t: f64, t: f64, bond_maturity: f64| self.bond_price_t(r_t, t, bond_maturity),
         )
@@ -260,14 +251,12 @@ impl HullWhite<'_> {
         r_t: f64,
         t: f64,
         coupon_times: &[f64],
-        bond_maturity: f64,
         coupon_rate: f64,
     ) -> f64 {
         coupon_bond_generic_t(
             r_t,
             t,
             coupon_times,
-            bond_maturity,
             coupon_rate,
             &|r_t: f64, t: f64, bond_maturity: f64| self.bond_price_t_deriv(r_t, t, bond_maturity),
         )
@@ -279,26 +268,21 @@ impl HullWhite<'_> {
     /// ```
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
-    /// let coupon_times = vec![1.25, 1.5, 1.75]; //should be between t and bond_maturity
-    /// let bond_maturity = 2.0;
+    /// let coupon_times = vec![1.25, 1.5, 1.75, 2.0]; //measure time from now (0), all should be greater than t.  Final coupon is the bond maturity
     /// let coupon_rate = 0.05;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
     /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
-    /// let bond_price = hull_white.coupon_bond_price_now(&coupon_times, bond_maturity, coupon_rate);
+    /// let bond_price = hull_white.coupon_bond_price_now(&coupon_times, coupon_rate);
     /// ```
     pub fn coupon_bond_price_now(
         &self,
         coupon_times: &[f64], //does not include the bond_maturity, but the function does check for that
-        bond_maturity: f64,
         coupon_rate: f64,
     ) -> f64 {
-        coupon_bond_generic_now(
-            coupon_times,
-            bond_maturity,
-            coupon_rate,
-            &|bond_maturity: f64| self.bond_price_now(bond_maturity),
-        )
+        coupon_bond_generic_now(coupon_times, coupon_rate, &|bond_maturity: f64| {
+            self.bond_price_now(bond_maturity)
+        })
     }
     /// Returns price of a call option on zero coupon bond at some future time
     ///
@@ -356,110 +340,40 @@ impl HullWhite<'_> {
             self.t_forward_bond_vol(t, option_maturity, bond_maturity), //volatility with maturity
         )
     }
-}
-
-/*The price of a call option on coupon bond under Hull White...uses jamshidian's trick*/
-fn coupon_bond_option_generic_t(
-    r_t: f64,
-    a: f64,
-    sigma: f64,
-    t: f64,
-    option_maturity: f64,
-    coupon_times: &[f64], //does not include final payment (bond maturity)
-    bond_maturity: f64,
-    coupon_rate: f64,
-    strike: f64,
-    yield_curve: &dyn Fn(f64) -> f64,
-    forward_curve: &dyn Fn(f64) -> f64,
-    generic_fn: &dyn Fn(
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        &dyn Fn(f64) -> f64,
-        &dyn Fn(f64) -> f64,
-    ) -> f64,
-) -> f64 {
-    let par_value = 1.0;
-    let fn_to_optimize = |r| {
-        coupon_bond_price_t(
-            r,
-            a,
-            sigma,
-            option_maturity,
-            coupon_times,
-            bond_maturity,
-            coupon_rate,
-            yield_curve,
-            forward_curve,
-        ) - strike
-    };
-    let fn_derv = |r| {
-        coupon_bond_price_t_deriv(
-            r,
-            a,
-            sigma,
-            option_maturity,
-            coupon_times,
-            bond_maturity,
-            coupon_rate,
-            yield_curve,
-            forward_curve,
-        )
-    };
-    let r_optimal = nrfind::find_root(&fn_to_optimize, &fn_derv, R_INIT, PREC_1, MAX_ITER)
-        .expect("Requires convergence of optimal r");
-    let final_payment = generic_fn(
-        r_t,
-        a,
-        sigma,
-        t,
-        option_maturity,
-        bond_maturity,
-        bond_price_t(
-            r_optimal,
-            a,
-            sigma,
-            option_maturity,
-            bond_maturity,
-            yield_curve,
-            forward_curve,
-        ),
-        yield_curve,
-        forward_curve,
-    ) * (par_value + coupon_rate); //par of one+coupon rate
-    coupon_times
-        .iter()
-        .fold(final_payment, |accum, coupon_time| {
-            if *coupon_time > t && *coupon_time < bond_maturity {
-                accum
-                    + coupon_rate
-                        * generic_fn(
-                            r_t,
-                            a,
-                            sigma,
-                            t,
-                            option_maturity,
-                            *coupon_time,
-                            bond_price_t(
-                                r_optimal,
-                                a,
-                                sigma,
-                                option_maturity,
-                                *coupon_time,
-                                yield_curve,
-                                forward_curve,
-                            ),
-                            yield_curve,
-                            forward_curve,
-                        )
-            } else {
-                accum
-            }
-        })
+    //The price of a call option on coupon bond under Hull White...uses jamshidian's trick*
+    fn coupon_bond_option_generic_t(
+        &self,
+        r_t: f64,
+        t: f64,
+        option_maturity: f64,
+        coupon_times: &[f64],
+        coupon_rate: f64,
+        strike: f64,
+        generic_fn: &impl Fn(f64, f64, f64, f64, f64) -> f64,
+    ) -> f64 {
+        let par_value = 1.0;
+        let final_coupon_index = coupon_times.len() - 1;
+        let fn_to_optimize =
+            |r| self.coupon_bond_price_t(r, option_maturity, coupon_times, coupon_rate) - strike;
+        let fn_derv =
+            |r| self.coupon_bond_price_t_deriv(r, option_maturity, coupon_times, coupon_rate);
+        let r_optimal = nrfind::find_root(&fn_to_optimize, &fn_derv, R_INIT, PREC_1, MAX_ITER)
+            .expect("Requires convergence of optimal r");
+        coupon_times
+            .iter()
+            .enumerate()
+            .map(|(index, coupon_time)| {
+                let is_last = final_coupon_index == index;
+                generic_fn(
+                    r_t,
+                    t,
+                    option_maturity,
+                    *coupon_time,
+                    self.bond_price_t(r_optimal, option_maturity, *coupon_time),
+                ) * (coupon_rate + if is_last { par_value } else { 0.0 })
+            })
+            .sum()
+    }
 }
 /// Returns price of a call option on a coupon bond at some future time
 ///
