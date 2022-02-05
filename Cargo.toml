@@ -1,6 +1,6 @@
 [package]
 name = "hull_white"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Daniel Stahl <danstahl1138@gmail.com>"]
 homepage = "https://github.com/danielhstahl/hull_white_rust"
 repository = "https://github.com/danielhstahl/hull_white_rust"
@@ -10,9 +10,9 @@ description = "Pricing functions assuming a Hull White short rate"
 edition = "2018"
 
 [dependencies]
-nrfind = "1.0.2"
-black_scholes = "0.5.0"
-binomial_tree = "0.4.0"
+nrfind = "1.0.3"
+black_scholes = "0.7.1"
+binomial_tree = "0.5.0"
 
 [dev-dependencies]
 approx = "0.2.0"
