@@ -5,7 +5,7 @@
 [lin-badge]: https://github.com/danielhstahl/hull_white_rust/workflows/Rust/badge.svg
 [lin-link]:  https://github.com/danielhstahl/hull_white_rust/actions
 [cov-badge]: https://codecov.io/gh/danielhstahl/hull_white_rust/branch/master/graph/badge.svg
-[cov-link]:  https://codecov.io/gh/phildanielhstahllyfan1138/hull_white_rust
+[cov-link]:  https://codecov.io/gh/danielhstahl/hull_white_rust
 
 ## Hull White
 
@@ -13,7 +13,7 @@ This library implements functions that price fixed income products assuming that
 
 ## Documentation
 
-The [Documentation](./documentation) holds the model documentation for the various pricing functions and assumptions.  Library (API) documentation is available at [docs.rs](https://docs.rs/hull_white/0.3.3/hull_white/)
+The [Documentation](./documentation) holds the model documentation for the various pricing functions and assumptions.  Library (API) documentation is available at [docs.rs](https://docs.rs/hull_white/0.6.0/hull_white/)
 
 ## Requirements
 
@@ -23,7 +23,7 @@ The documentation is written in [R Sweave](https://www.r-bloggers.com/getting-st
 
 Add the following package to your Cargo.toml:
 
-`hull_white = "0.5.0"`
+`hull_white = "0.6.0"`
 
 ## Benchmarks
 
