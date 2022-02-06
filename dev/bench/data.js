@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1644171872731,
+  "lastUpdate": 1644172811590,
   "repoUrl": "https://github.com/danielhstahl/hull_white_rust",
   "entries": {
     "Benchmark": [
@@ -131,6 +131,72 @@ window.BENCHMARK_DATA = {
             "name": "bench_swaption_european",
             "value": 19992,
             "range": "± 4485",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "danstahl1138@gmail.com",
+            "name": "Daniel Stahl",
+            "username": "danielhstahl"
+          },
+          "committer": {
+            "email": "danstahl1138@gmail.com",
+            "name": "Daniel Stahl",
+            "username": "danielhstahl"
+          },
+          "distinct": true,
+          "id": "8dd6b4510a9bc437e36e87e65ff1e079f770dad5",
+          "message": "fixed comment on alert",
+          "timestamp": "2022-02-06T12:38:21-06:00",
+          "tree_id": "7169f7ad83af343ecf546bcdca3d271e13e61dc4",
+          "url": "https://github.com/danielhstahl/hull_white_rust/commit/8dd6b4510a9bc437e36e87e65ff1e079f770dad5"
+        },
+        "date": 1644172811206,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "bench_bond_now",
+            "value": 24,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "bench_bond_t",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "bench_coupon_bond_now",
+            "value": 125,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "bench_coupon_bond_t",
+            "value": 370,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "bench_swap_rate",
+            "value": 1461,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "bench_swaption_american",
+            "value": 33621744,
+            "range": "± 46481",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "bench_swaption_european",
+            "value": 20814,
+            "range": "± 43",
             "unit": "ns/iter"
           }
         ]
