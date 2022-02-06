@@ -27,4 +27,4 @@ Add the following package to your Cargo.toml:
 
 ## Benchmarks
 
-Benchmarks are at https://danielhstahl.github.io/hull_white_rust/report/.
+Benchmarks are at https://danielhstahl.github.io/hull_white_rust/dev/bench/.
