@@ -17,8 +17,6 @@ binomial_tree = "0.5.0"
 [dev-dependencies]
 approx = "0.2.0"
 rand = "0.5"
-criterion = "0.3"
 
-[[bench]]
-name = "bench"
-harness = false
+[profile.bench]
+lto = true
