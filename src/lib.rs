@@ -129,20 +129,29 @@ fn coupon_bond_generic_now(
         })
         .sum()
 }
-pub struct HullWhite<'a> {
+pub struct HullWhite<'a, T, U>
+where
+    T: Fn(f64) -> f64 + std::marker::Sync,
+    U: Fn(f64) -> f64 + std::marker::Sync,
+{
     a: f64,
     sigma: f64,
-    yield_curve: &'a dyn Fn(f64) -> f64, //this is not divided by time, so this gets perpetually larger (unless rates are negative)
-    forward_curve: &'a dyn Fn(f64) -> f64,
+    //yield_curve is not divided by time, so this gets perpetually larger (unless rates are negative)
+    yield_curve: &'a T,
+    forward_curve: &'a U,
 }
 
-impl HullWhite<'_> {
+impl<T, U> HullWhite<'_, T, U>
+where
+    T: Fn(f64) -> f64 + std::marker::Sync,
+    U: Fn(f64) -> f64 + std::marker::Sync,
+{
     pub fn init<'a>(
         a: f64,
         sigma: f64,
-        yield_curve: &'a dyn Fn(f64) -> f64,
-        forward_curve: &'a dyn Fn(f64) -> f64,
-    ) -> HullWhite<'a> {
+        yield_curve: &'a T,
+        forward_curve: &'a U,
+    ) -> HullWhite<'a, T, U> {
         HullWhite {
             a,
             sigma,
