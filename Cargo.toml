@@ -1,17 +1,17 @@
 [package]
 name = "hull_white"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Daniel Stahl <danstahl1138@gmail.com>"]
 homepage = "https://github.com/danielhstahl/hull_white_rust"
 repository = "https://github.com/danielhstahl/hull_white_rust"
 readme = "README.md"
 license = "MIT"
 description = "Pricing functions assuming a Hull White short rate"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 nrfind = "1.0.3"
-black_scholes = "0.7.1"
+black_scholes = "0.10.1"
 binomial_tree = "0.5.0"
 
 [dev-dependencies]
