@@ -1,6 +1,6 @@
 [package]
 name = "hull_white"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Daniel Stahl <danstahl1138@gmail.com>"]
 homepage = "https://github.com/danielhstahl/hull_white_rust"
 repository = "https://github.com/danielhstahl/hull_white_rust"
@@ -15,8 +15,13 @@ black_scholes = "0.10.1"
 binomial_tree = "0.5.0"
 
 [dev-dependencies]
-approx = "0.2.0"
-rand = "0.5"
+approx = "0.5"
+rand = "0.8"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "benchmark"
+harness = false
 
 [profile.bench]
 lto = true
