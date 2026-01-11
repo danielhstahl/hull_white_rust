@@ -1,16 +1,63 @@
-//! This is a library of fixed income pricers using a
-//! Hull White process as the underlying process.  The
-//! fundamental times here are (0, t, T, TM).  0 is the
-//! current time (and is  reflective of the current
-//! yield  curve) while t is some future time  that we may
-//! want to price options at given the underlying at
-//! that time.  T and TM are shorthands for a variety of
-//! asset times.  For example, an option on a bond requires
-//! an option maturity and a bond maturity.  The option
-//! maturity should be before the bond maturity, but after
-//! the future time t.  Note that ALL TIMES ARE WITH
-//! RESPECT TO 0!
+//! # Hull-White Interest Rate Model Library
 //!
+//! This library implements pricing functions for fixed income products using a Hull-White interest rate model.
+//! The Hull-White model is a mathematical model describing the evolution of interest rates, commonly used
+//! in financial mathematics to price interest rate derivatives.
+//!
+//! ## Overview
+//!
+//! The library provides functions to price various fixed income instruments including:
+//! - Zero-coupon and coupon bonds
+//! - Bond options (calls and puts)
+//! - Interest rate caps and floors
+//! - Swaps and swaptions
+//! - Eurodollar futures
+//!
+//! ## Key Concepts
+//!
+//! The fundamental time points in this library are (0, t, T, TM), where:
+//! - 0 is the current time (reflective of the current yield curve)
+//! - t is some future time for pricing options given the underlying at that time
+//! - T and TM represent various asset times (option maturity, bond maturity, etc.)
+//!
+//! All times are measured with respect to time 0.
+//!
+//! ## Example Usage
+//!
+//! ```rust
+//! use hull_white::HullWhite;
+//!
+//! // Define yield and forward curves
+//! let yield_curve = |t: f64| 0.05 * t;  // Simple linear yield curve
+//! let forward_curve = |t: f64| t.ln();  // Natural log forward curve
+//!
+//! // Create a Hull-White model with parameters
+//! let a = 0.1;      // Mean reversion speed
+//! let sigma = 0.01; // Volatility parameter
+//! let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+//!
+//! // Price a zero-coupon bond maturing in 2 years
+//! let bond_price = hull_white.bond_price_now(2.0);
+//! println!("Bond price: {}", bond_price);
+//!
+//! // Price a call option on a bond with 2-year maturity, expiring in 1 year, with strike 0.95
+//! let option_price = hull_white.bond_call_now(1.0, 2.0, 0.95);
+//! println!("Call option price: {}", option_price);
+//! ```
+//!
+//! ## Mathematical Foundation
+//!
+//! The Hull-White model assumes that the short rate follows the stochastic differential equation:
+//! `dr(t) = [θ(t) - a*r(t)]dt + σ*dW(t)`
+//!
+//! where:
+//! - `a` is the speed of mean reversion
+//! - `σ` is the volatility parameter
+//! - `θ(t)` is a time-dependent function calibrated to the initial term structure
+//! - `W(t)` is a Wiener process (Brownian motion)
+
+pub mod error;
+use error::HullWhiteError;
 
 const PREC_1: f64 = 0.0000001;
 const R_INIT: f64 = 0.03;
@@ -82,11 +129,7 @@ fn get_time_from_t_index(index: usize, t: f64, delta: f64) -> f64 {
 }
 
 fn max_or_zero(v: f64) -> f64 {
-    if v > 0.0 {
-        v
-    } else {
-        0.0
-    }
+    if v > 0.0 { v } else { 0.0 }
 }
 fn payoff_swaption(is_payer: bool, swp: f64) -> f64 {
     match is_payer {
@@ -141,23 +184,47 @@ where
     forward_curve: &'a U,
 }
 
-impl<T, U> HullWhite<'_, T, U>
+impl<'a, T, U> HullWhite<'a, T, U>
 where
     T: Fn(f64) -> f64 + std::marker::Sync,
     U: Fn(f64) -> f64 + std::marker::Sync,
 {
-    pub fn init<'a>(
+    pub fn init(
         a: f64,
         sigma: f64,
         yield_curve: &'a T,
         forward_curve: &'a U,
-    ) -> HullWhite<'a, T, U> {
-        HullWhite {
+    ) -> Result<Self, HullWhiteError> {
+        Self::validate_parameters(a, sigma)?;
+        Ok(Self {
             a,
             sigma,
             yield_curve,
             forward_curve,
+        })
+    }
+    fn validate_parameters(a: f64, sigma: f64) -> Result<(), HullWhiteError> {
+        if a <= 0.0 {
+            return Err(HullWhiteError::InvalidInput(
+                "Mean reversion parameter 'a' must be positive".to_string(),
+            ));
         }
+        if sigma <= 0.0 {
+            return Err(HullWhiteError::InvalidInput(
+                "Volatility parameter 'sigma' must be positive".to_string(),
+            ));
+        }
+        if !a.is_finite() {
+            return Err(HullWhiteError::InvalidInput(
+                "Mean reversion parameter 'a' must be finite".to_string(),
+            ));
+        }
+        if !sigma.is_finite() {
+            return Err(HullWhiteError::InvalidInput(
+                "Volatility parameter 'sigma' must be finite".to_string(),
+            ));
+        }
+        Ok(())
     }
     /// Returns volality of bond under the t-forward measure.
     ///
@@ -171,7 +238,7 @@ where
     /// let t_f = 3.0;
     /// let yield_curve = |t:f64|0.05*t;
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white= hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white= hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_vol = hull_white.t_forward_bond_vol(
     ///     t, t_m, t_f
     /// );
@@ -197,7 +264,7 @@ where
     /// let r_t = 0.04; //rate at t
     /// let yield_curve = |t:f64|0.05*t;
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white= hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white= hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_vol = hull_white.mu_r(r_t, t, t_m);
     /// ```
     pub fn mu_r(&self, r_t: f64, t: f64, t_m: f64) -> f64 {
@@ -214,7 +281,7 @@ where
     /// let t_m = 2.0; //horizon of the variance
     /// let yield_curve = |t:f64|0.05*t;
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let variance = hull_white.variance_r(t, t_m);
     /// ```
     pub fn variance_r(&self, t: f64, t_m: f64) -> f64 {
@@ -233,7 +300,7 @@ where
     /// let bond_maturity = 2.0;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_price = hull_white.bond_price_t(r_t, t, bond_maturity);
     /// ```
     pub fn bond_price_t(&self, r_t: f64, t: f64, bond_maturity: f64) -> f64 {
@@ -273,7 +340,7 @@ where
     /// let bond_maturity = 2.0;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_price = hull_white.bond_price_now(bond_maturity);
     /// ```
     pub fn bond_price_now(&self, bond_maturity: f64) -> f64 {
@@ -292,7 +359,7 @@ where
     /// let coupon_rate = 0.05;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_price = hull_white.coupon_bond_price_t(r_t, t, &coupon_times, coupon_rate);
     /// ```
     pub fn coupon_bond_price_t(
@@ -336,7 +403,7 @@ where
     /// let coupon_rate = 0.05;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_price = hull_white.coupon_bond_price_now(&coupon_times, coupon_rate);
     /// ```
     pub fn coupon_bond_price_now(
@@ -362,7 +429,7 @@ where
     /// let strike = 0.98;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_call = hull_white.bond_call_t(r_t, t, option_maturity, bond_maturity, strike);
     /// ```
     pub fn bond_call_t(
@@ -392,7 +459,7 @@ where
     /// let strike = 0.98;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_call = hull_white.bond_call_now(option_maturity, bond_maturity, strike);
     /// ```
     pub fn bond_call_now(&self, option_maturity: f64, bond_maturity: f64, strike: f64) -> f64 {
@@ -414,14 +481,15 @@ where
         coupon_rate: f64,
         strike: f64,
         generic_fn: &impl Fn(f64, f64, f64, f64, f64) -> f64,
-    ) -> Result<f64, f64> {
+    ) -> Result<f64, HullWhiteError> {
         let par_value = 1.0;
         let final_coupon_index = coupon_times.len() - 1;
         let fn_to_optimize =
             |r| self.coupon_bond_price_t(r, option_maturity, coupon_times, coupon_rate) - strike;
         let fn_derv =
             |r| self.coupon_bond_price_t_deriv(r, option_maturity, coupon_times, coupon_rate);
-        let r_optimal = nrfind::find_root(&fn_to_optimize, &fn_derv, R_INIT, PREC_1, MAX_ITER)?;
+        let r_optimal = nrfind::find_root(&fn_to_optimize, &fn_derv, R_INIT, PREC_1, MAX_ITER)
+            .map_err(|e| HullWhiteError::RootFindingError(e.to_string()))?;
         Ok(coupon_times
             .iter()
             .enumerate()
@@ -452,7 +520,7 @@ where
     /// let strike = 1.0;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_call = hull_white.coupon_bond_call_t(r_t, t, option_maturity, &coupon_times, coupon_rate, strike);
     /// ```
     pub fn coupon_bond_call_t(
@@ -463,7 +531,7 @@ where
         coupon_times: &[f64],
         coupon_rate: f64,
         strike: f64,
-    ) -> Result<f64, f64> {
+    ) -> Result<f64, HullWhiteError> {
         self.coupon_bond_option_generic_t(
             r_t,
             t,
@@ -490,7 +558,7 @@ where
     /// let strike = 0.98;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_put = hull_white.bond_put_t(r_t, t, option_maturity, bond_maturity, strike);
     /// ```
     pub fn bond_put_t(
@@ -520,7 +588,7 @@ where
     /// let strike = 0.98;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_put = hull_white.bond_put_now(option_maturity, bond_maturity, strike);
     /// ```
     pub fn bond_put_now(&self, option_maturity: f64, bond_maturity: f64, strike: f64) -> f64 {
@@ -547,7 +615,7 @@ where
     /// let strike = 1.0;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_put = hull_white.coupon_bond_put_t(r_t, t, option_maturity, &coupon_times, coupon_rate, strike);
     /// ```
     pub fn coupon_bond_put_t(
@@ -558,7 +626,7 @@ where
         coupon_times: &[f64],
         coupon_rate: f64,
         strike: f64,
-    ) -> Result<f64, f64> {
+    ) -> Result<f64, HullWhiteError> {
         self.coupon_bond_option_generic_t(
             r_t,
             t,
@@ -583,7 +651,7 @@ where
     /// let strike = 0.04;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let caplet = hull_white.caplet_now(option_maturity, delta, strike);
     /// ```
     pub fn caplet_now(&self, option_maturity: f64, delta: f64, strike: f64) -> f64 {
@@ -608,7 +676,7 @@ where
     /// let strike = 0.04;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let caplet = hull_white.caplet_t(r_t, t, option_maturity, delta, strike);
     /// ```
     pub fn caplet_t(&self, r_t: f64, t: f64, option_maturity: f64, delta: f64, strike: f64) -> f64 {
@@ -634,7 +702,7 @@ where
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let edf = hull_white.euro_dollar_future_t(r_t,  t, option_maturity, delta);
     /// ```
     pub fn euro_dollar_future_t(&self, r_t: f64, t: f64, option_maturity: f64, delta: f64) -> f64 {
@@ -657,7 +725,7 @@ where
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let edf = hull_white.euro_dollar_future_now(option_maturity, delta);
     /// ```
     pub fn euro_dollar_future_now(&self, option_maturity: f64, delta: f64) -> f64 {
@@ -682,7 +750,7 @@ where
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let forward_libor = hull_white.forward_libor_rate_t(r_t, t, maturity, delta);
     /// ```
     pub fn forward_libor_rate_t(&self, r_t: f64, t: f64, maturity: f64, delta: f64) -> f64 {
@@ -702,7 +770,7 @@ where
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let forward_libor = hull_white.forward_libor_rate_now(maturity, delta);
     /// ```
     pub fn forward_libor_rate_now(&self, maturity: f64, delta: f64) -> f64 {
@@ -722,7 +790,7 @@ where
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let libor = hull_white.libor_rate_t(r_t, t, delta);
     /// ```
     pub fn libor_rate_t(&self, r_t: f64, t: f64, delta: f64) -> f64 {
@@ -743,7 +811,7 @@ where
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let forward_swap = hull_white.forward_swap_rate_t(r_t,  t, swap_initiation, num_swap_payments, delta);
     /// ```
     pub fn forward_swap_rate_t(
@@ -775,7 +843,7 @@ where
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let swap_rate = hull_white.swap_rate_t(r_t, t, num_swap_payments, delta);
     /// ```
     pub fn swap_rate_t(&self, r_t: f64, t: f64, num_swap_payments: usize, delta: f64) -> f64 {
@@ -801,7 +869,7 @@ where
     /// let swap_rate = 0.04; //at initiation, the swap rate is such that the swap has zero value
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let swap = hull_white.swap_price_t(r_t, t, swap_maturity, delta, swap_rate);
     /// ```
     pub fn swap_price_t(
@@ -834,7 +902,7 @@ where
     /// let swap_rate = 0.04;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let swap = hull_white.swap_price_t_init(r_t, t, t, num_swap_payments, delta, swap_rate);
     /// ```
     pub fn swap_price_t_init(
@@ -872,7 +940,7 @@ where
     /// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let swaption = hull_white.european_payer_swaption_t(r_t, t, option_maturity, num_swap_payments, delta, swap_rate).unwrap();
     /// ```
     pub fn european_payer_swaption_t(
@@ -883,7 +951,7 @@ where
         num_swap_payments: usize,
         delta: f64,
         swap_rate: f64,
-    ) -> Result<f64, f64> {
+    ) -> Result<f64, HullWhiteError> {
         let coupon_times = get_coupon_times(num_swap_payments, option_maturity, delta);
         let strike = 1.0;
         self.coupon_bond_put_t(
@@ -910,7 +978,7 @@ where
     /// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let swaption = hull_white.european_receiver_swaption_t(r_t, t, option_maturity, num_swap_payments, delta, swap_rate).unwrap();
     /// ```
     pub fn european_receiver_swaption_t(
@@ -921,7 +989,7 @@ where
         num_swap_payments: usize,
         delta: f64,
         swap_rate: f64,
-    ) -> Result<f64, f64> {
+    ) -> Result<f64, HullWhiteError> {
         let coupon_times = get_coupon_times(num_swap_payments, option_maturity, delta);
         let strike = 1.0;
         self.coupon_bond_call_t(
@@ -1000,7 +1068,7 @@ where
     /// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let num_tree_steps = 100;
     /// let swaption = hull_white.american_payer_swaption_t(
     ///     r_t, t, option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
@@ -1047,7 +1115,7 @@ where
     /// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve);
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let num_tree_steps = 100;
     /// let swaption = hull_white.american_receiver_swaption_t(
     ///     r_t, t, option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
@@ -1226,7 +1294,7 @@ mod tests {
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
         let delta = 0.25;
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let caplet_n = hull_white.caplet_now(option_maturity, delta, strike);
         let caplet = hull_white.caplet_t(curr_rate, future_time, option_maturity, delta, strike);
         assert_abs_diff_eq!(caplet_n, caplet, epsilon = 0.00001);
@@ -1250,7 +1318,7 @@ mod tests {
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
         let delta = 0.25;
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let libor_n = hull_white.forward_libor_rate_now(maturity, delta);
         let libor_t = hull_white.forward_libor_rate_t(curr_rate, future_time, maturity, delta);
         assert_abs_diff_eq!(libor_n, libor_t, epsilon = 0.0001);
@@ -1280,8 +1348,8 @@ mod tests {
         let normal = StandardNormal;
         let num_sims: usize = 1000; //hopefully accurate
         let num_discrete_steps: usize = 1000;
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
-        let total_sum = (0..num_sims).fold(0.0, move |accum, _sample_index| {
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+        let total_sum = (0..num_sims).fold(0.0, |accum, _sample_index| {
             let mut sum_r = 0.0;
             let mut running_r = curr_rate;
             let dt = (option_maturity - future_time) / (num_discrete_steps as f64 - 1.0);
@@ -1314,8 +1382,6 @@ mod tests {
             }
         });
         let average_caplet = delta * (total_sum / (num_sims as f64));
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
-
         let analytical_caplet = hull_white.caplet_now(option_maturity, delta, strike);
         assert_abs_diff_eq!(average_caplet, analytical_caplet, epsilon = 0.0001);
     }
@@ -1343,10 +1409,10 @@ mod tests {
         let mut rng_seed = get_rng_seed(seed);
         let normal = StandardNormal;
         let num_sims: usize = 1000000; //hopefully accurate
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let mu = hull_white.mu_r(curr_rate, future_time, option_maturity);
         let vol = hull_white.variance_r(future_time, option_maturity).sqrt();
-        let total_sum = (0..num_sims).fold(0.0, move |accum, _sample_index| {
+        let total_sum = (0..num_sims).fold(0.0, |accum, _sample_index| {
             let norm = normal.sample(&mut rng_seed);
             let final_r = mu + vol * norm;
             let final_bond =
@@ -1354,8 +1420,6 @@ mod tests {
             accum + 1.0 / final_bond
         });
         let average_edf = ((total_sum / (num_sims as f64)) - 1.0) / delta;
-
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
 
         let analytical_edf =
             hull_white.euro_dollar_future_t(curr_rate, future_time, option_maturity, delta);
@@ -1380,7 +1444,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let bond_price_now = hull_white.bond_price_now(maturity);
         let bond_price_t = hull_white.bond_price_t(curr_rate, future_time, maturity);
         assert_abs_diff_eq!(bond_price_now, bond_price_t, epsilon = 0.0000001);
@@ -1405,7 +1469,7 @@ mod tests {
         };
         let coupon_times = get_coupon_times(6, future_time, delta); //this was 5, but made six since last payment is now included
         let coupon_rate = 0.05 * delta;
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let bond_price_now = hull_white.coupon_bond_price_now(&coupon_times, coupon_rate);
         let bond_price_t =
             hull_white.coupon_bond_price_t(curr_rate, future_time, &coupon_times, coupon_rate);
@@ -1430,7 +1494,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         assert_eq!(
             hull_white.bond_price_t(curr_rate, future_time, option_maturity),
             hull_white.bond_price_now(option_maturity - future_time)
@@ -1453,7 +1517,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         assert_eq!(
             hull_white.bond_price_t(curr_rate, future_time, future_time),
             1.0
@@ -1479,7 +1543,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         assert_abs_diff_eq!(
             hull_white.swap_price_t(
                 curr_rate,
@@ -1513,7 +1577,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let sp_init = hull_white.swap_price_t_init(
             curr_rate,
             future_time,
@@ -1546,7 +1610,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let swap_rate = hull_white.forward_swap_rate_t(
             curr_rate,
             future_time,
@@ -1599,7 +1663,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let swap_rate = hull_white.forward_swap_rate_t(
             curr_rate,
             future_time,
@@ -1652,7 +1716,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let swap_rate = hull_white.forward_swap_rate_t(
             curr_rate,
             future_time,
@@ -1703,7 +1767,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let swap_rate = hull_white.forward_swap_rate_t(
             curr_rate,
             future_time,
@@ -1754,7 +1818,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let bond_call = hull_white.bond_call_t(
             curr_rate,
             future_time,
@@ -1784,7 +1848,7 @@ mod tests {
             b + (-a * t).exp() * (curr_rate - b)
                 - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
         };
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
         let bond_call = hull_white.bond_call_t(
             curr_rate,
             future_time,

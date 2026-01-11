@@ -20,7 +20,7 @@ fn bench_bond_t(bench: &mut Bencher) {
         b + (-a * t).exp() * (curr_rate - b)
             - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
     };
-    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve);
+    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
     bench.iter(|| hull_white.bond_price_t(curr_rate, future_time, maturity))
 }
 
@@ -40,7 +40,7 @@ fn bench_bond_now(bench: &mut Bencher) {
         b + (-a * t).exp() * (curr_rate - b)
             - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
     };
-    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve);
+    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
     bench.iter(|| hull_white.bond_price_now(maturity))
 }
 
@@ -62,7 +62,7 @@ fn bench_coupon_bond_t(bench: &mut Bencher) {
         b + (-a * t).exp() * (curr_rate - b)
             - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
     };
-    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve);
+    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
 
     bench.iter(|| {
         let coupon_times = hull_white::get_coupon_times(5, future_time, delta);
@@ -88,7 +88,7 @@ fn bench_coupon_bond_now(bench: &mut Bencher) {
         b + (-a * t).exp() * (curr_rate - b)
             - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
     };
-    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve);
+    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
 
     bench.iter(|| {
         let coupon_times = hull_white::get_coupon_times(5, future_time, delta);
@@ -115,7 +115,7 @@ fn bench_swap_rate(bench: &mut Bencher) {
         b + (-a * t).exp() * (curr_rate - b)
             - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
     };
-    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve);
+    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
     bench.iter(|| {
         hull_white.forward_swap_rate_t(
             curr_rate,
@@ -147,7 +147,7 @@ fn bench_swaption_european(bench: &mut Bencher) {
         b + (-a * t).exp() * (curr_rate - b)
             - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
     };
-    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve);
+    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
     let swap_rate = hull_white.forward_swap_rate_t(
         curr_rate,
         future_time,
@@ -187,7 +187,7 @@ fn bench_swaption_american(bench: &mut Bencher) {
         b + (-a * t).exp() * (curr_rate - b)
             - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
     };
-    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve);
+    let hull_white = hull_white::HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
     let swap_rate = hull_white.forward_swap_rate_t(
         curr_rate,
         future_time,
