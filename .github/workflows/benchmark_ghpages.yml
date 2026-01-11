@@ -12,18 +12,18 @@ jobs:
   bench:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: hecrj/setup-rust-action@master
-      with:
-        rust-version: nightly
+      - uses: actions/checkout@v2
+      - uses: hecrj/setup-rust-action@master
+        with:
+          rust-version: nightly
 
-    - name: benchmark
-      run: cargo bench | tee output.txt
+      - name: benchmark
+        run: cargo bench | tee output.txt
 
-    - name: Store benchmark result
-      uses: rhysd/github-action-benchmark@v1
-      with:
-        tool: 'cargo'
-        output-file-path: output.txt
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        auto-push: true
+      - name: Store benchmark result
+        uses: rhysd/github-action-benchmark@v1
+        with:
+          tool: "cargo"
+          output-file-path: output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true

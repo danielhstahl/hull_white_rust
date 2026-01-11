@@ -2,7 +2,7 @@ name: RustDeploy
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [master, main]
 
 jobs:
   build:
@@ -11,15 +11,15 @@ jobs:
       matrix:
         rust: [stable]
     steps:
-    - uses: actions/checkout@v2
-    - uses: hecrj/setup-rust-action@master
-      with:
-        rust-version: ${{ matrix.rust }}
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
-    - name: Document 
-      run: cargo doc
-    - name: Publish
-      run: cargo publish --token ${{ secrets.CARGO_TOKEN }} --allow-dirty || true
+      - uses: actions/checkout@v2
+      - uses: hecrj/setup-rust-action@master
+        with:
+          rust-version: ${{ matrix.rust }}
+      - name: Build
+        run: cargo build --verbose
+      - name: Run tests
+        run: cargo test --verbose
+      - name: Document
+        run: cargo doc
+      - name: Publish
+        run: cargo publish --token ${{ secrets.CARGO_TOKEN }} --allow-dirty || true
