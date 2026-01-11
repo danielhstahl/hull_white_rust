@@ -4,74 +4,67 @@ on: [push, pull_request]
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust: [stable, nightly]
 
     steps:
-    - uses: actions/checkout@v2
-    - uses: hecrj/setup-rust-action@master
-      with:
-        rust-version: ${{ matrix.rust }}
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests stable
-      if: matrix.rust == 'stable'
-      run: cargo test --verbose
-    - name: Run tests nightly with coverage
-      if: matrix.rust == 'nightly' 
-      env:
-        CARGO_INCREMENTAL: 0
-        RUSTFLAGS: -Zprofile -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort
-        RUSTDOCFLAGS: -Cpanic=abort
-        CRATE_NAME: hull_white
-      run: |
-        cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
-        cat lcov.info
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
+        with:
+          rust-version: ${{ matrix.rust }}
+      - name: Build
+        run: cargo build --verbose
+      - name: Run tests stable
+        if: matrix.rust == 'stable'
+        run: cargo test --verbose
+      - name: Install cargo-llvm-cov
+        if: matrix.rust == 'nightly'
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Run tests nightly with coverage
+        if: matrix.rust == 'nightly'
+        run: |
+          cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+          cat lcov.info
 
-    - name: Document 
-      run: cargo doc
-    - name: Coveralls
-      if: matrix.rust == 'nightly' 
-      uses: coverallsapp/github-action@master
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        path-to-lcov: "lcov.info"
-  
+      - name: Document
+        run: cargo doc
+      - name: Coveralls
+        if: matrix.rust == 'nightly'
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: "lcov.info"
+
   bench:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: hecrj/setup-rust-action@master
-      with:
-        rust-version: nightly
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
+        with:
+          rust-version: nightly
 
-    - name: benchmark
-      run: cargo bench | tee output.txt
+      - name: benchmark
+        run: cargo bench | tee output.txt
 
-    - name: Download previous benchmark data
-      uses: actions/cache@v1
-      with:
-        path: ./cache
-        key: ${{ runner.os }}-benchmark
-    # Run `github-action-benchmark` action
-    - name: Store benchmark result
-      uses: benchmark-action/github-action-benchmark@v1
-      with:
-        # What benchmark tool the output.txt came from
-        tool: 'cargo'
-        # Where the output from the benchmark tool is stored
-        output-file-path: output.txt
-        # Where the previous data file is stored
-        external-data-json-path: ./cache/benchmark-data.json
-        # Workflow will fail when an alert happens
-        fail-on-alert: true
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        comment-on-alert: true
-        alert-threshold: '200%'
-
-
-    
-    
+      - name: Download previous benchmark data
+        uses: actions/cache@v5
+        with:
+          path: ./cache
+          key: ${{ runner.os }}-benchmark
+      # Run `github-action-benchmark` action
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v2
+        with:
+          # What benchmark tool the output.txt came from
+          tool: "cargo"
+          # Where the output from the benchmark tool is stored
+          output-file-path: output.txt
+          # Where the previous data file is stored
+          external-data-json-path: ./cache/benchmark-data.json
+          # Workflow will fail when an alert happens
+          fail-on-alert: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment-on-alert: true
+          alert-threshold: "200%"
