@@ -10,8 +10,8 @@ jobs:
         rust: [stable, nightly]
 
     steps:
-      - uses: actions/checkout@v2
-      - uses: hecrj/setup-rust-action@master
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
         with:
           rust-version: ${{ matrix.rust }}
       - name: Build
@@ -29,7 +29,7 @@ jobs:
         run: cargo doc
       - name: Coveralls
         if: matrix.rust == 'nightly'
-        uses: coverallsapp/github-action@master
+        uses: coverallsapp/github-action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path-to-lcov: "lcov.info"
@@ -37,8 +37,8 @@ jobs:
   bench:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: hecrj/setup-rust-action@master
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
         with:
           rust-version: nightly
 
