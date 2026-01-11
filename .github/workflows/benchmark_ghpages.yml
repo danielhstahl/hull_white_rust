@@ -21,7 +21,7 @@ jobs:
         run: cargo bench | tee output.txt
 
       - name: Store benchmark result
-        uses: rhysd/github-action-benchmark@v1
+        uses: rhysd/github-action-benchmark@v2
         with:
           tool: "cargo"
           output-file-path: output.txt
