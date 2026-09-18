@@ -1798,6 +1798,118 @@ mod tests {
         assert_abs_diff_eq!(payer, tree_payer, epsilon = 0.0001);
     }
 
+    /// Bit-exact guard on the `t = 0` path.  The values below were produced by the pre-fix pricers at
+    /// commit 254d089 (`option_maturity` 1.5, `num_swap_payments` 20, `delta` 0.25, ATM-forward
+    /// strike, 400 tree steps), captured with a round-trip-checked `{:?}` print -- note `{:.17}` is
+    /// 17 digits *after the decimal point*, which for these magnitudes loses the last bit.
+    /// At `t = 0` the shifted tree clock and the absolute model clock coincide, so the
+    /// time-coordinate fix must leave every one of them bit-identical -- pinning bits rather than a
+    /// tolerance means a real behaviour change at `t = 0` cannot slip through unnoticed, and cannot
+    /// be "absorbed" by widening an epsilon later.
+    #[test]
+    fn swaption_tree_at_t_is_bit_identical_to_pre_fix() {
+        let option_maturity = 1.5;
+        let num_swap_payments = 20;
+        let delta = 0.25;
+        let steps = 400;
+        //             name     r0     a     b     sig   eur payer        eur receiver     amer payer   amer receiver
+        let golden: [(&str, f64, f64, f64, f64, f64, f64, f64, f64); 2] = [
+            (
+                "legacy",
+                0.05,
+                0.05,
+                0.05,
+                0.01,
+                0.017330477644662997,
+                0.017329771203617984,
+                0.01834265355592532,
+                0.017797483448434452,
+            ),
+            (
+                "steep",
+                0.02,
+                0.2,
+                0.06,
+                0.03,
+                0.03597512274296273,
+                0.03597334589011368,
+                0.03781406402902323,
+                0.04452822113093644,
+            ),
+        ];
+        for (name, r0, a, b, sig, eur_p, eur_r, amer_p, amer_r) in golden {
+            let (yield_curve, forward_curve) = hw_curves(r0, a, b, sig);
+            let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+            let swap_rate =
+                hull_white.forward_swap_rate_t(r0, 0.0, option_maturity, num_swap_payments, delta);
+            assert_bits_eq(
+                hull_white.european_swaption_tree(
+                    r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    true,
+                    steps,
+                ),
+                eur_p,
+                &format!("{name} european payer tree"),
+            );
+            assert_bits_eq(
+                hull_white.european_swaption_tree(
+                    r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    false,
+                    steps,
+                ),
+                eur_r,
+                &format!("{name} european receiver tree"),
+            );
+            assert_bits_eq(
+                hull_white.american_payer_swaption_t(
+                    r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                ),
+                amer_p,
+                &format!("{name} american payer"),
+            );
+            assert_bits_eq(
+                hull_white.american_receiver_swaption_t(
+                    r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                ),
+                amer_r,
+                &format!("{name} american receiver"),
+            );
+        }
+    }
+
+    /// Golden comparison helper: asserts the two f64 have identical bit patterns, so "unchanged" here
+    /// really means unchanged, not "within a tolerance that can be nudged".
+    #[allow(clippy::float_cmp)]
+    fn assert_bits_eq(actual: f64, expected: f64, what: &str) {
+        assert_eq!(
+            actual.to_bits(),
+            expected.to_bits(),
+            "{what} moved at t = 0: actual={actual:.17} expected={expected:.17}"
+        );
+    }
+
     #[test]
     fn european_swaption_tree_matches_analytic_when_t_is_nonzero() {
         //Regression for the shifted-vs-absolute time bug: the tree runs on the clock
