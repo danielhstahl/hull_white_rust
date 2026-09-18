@@ -1019,15 +1019,20 @@ where
         let sigma_prime = |_t_step: f64, _curr_val: f64, _dt: f64, _j: usize| 0.0;
         let sigma_inv = |_t_step: f64, y: f64, _dt: f64, _j: usize| self.sigma * y;
         let t_of_option = option_maturity - t;
+        //The tree runs on a clock shifted by the valuation time `t` (it spans `option_maturity - t`),
+        //but phi and every bond/swap leg are measured from "now" (0).  A node at tree time `tau` is
+        //therefore at absolute time `t + tau`; using the shifted time directly misprices the swap
+        //legs whenever `t > 0` (and whenever phi is not constant).
         let mut phi_cache: Vec<f64> = binomial_tree::get_all_t(t_of_option, num_steps)
-            .map(|t_a| self.phi_t(t_a))
+            .map(|tau| self.phi_t(t + tau))
             .collect();
-        phi_cache.push(self.phi_t(t_of_option));
+        phi_cache.push(self.phi_t(t + t_of_option));
         let payoff = |t_step: f64, curr_val: f64, _dt: f64, j: usize| {
+            let t_abs = t + t_step;
             let swp = self.swap_price_t_init(
                 curr_val + phi_cache[j],
-                t_step,
-                t_step,
+                t_abs,
+                t_abs,
                 num_swap_payments,
                 delta,
                 swap_rate,
@@ -1159,15 +1164,19 @@ where
         };
         let sigma_prime = |_t_step: f64, _curr_val: f64, _dt: f64, _j: usize| 0.0;
         let sigma_inv = |_t_step: f64, y: f64, _dt: f64, _j: usize| self.sigma * y;
-        let mut phi_cache: Vec<f64> = binomial_tree::get_all_t(option_maturity - t, num_steps)
-            .map(|t_a| self.phi_t(t_a))
+        let t_of_option = option_maturity - t;
+        //Same time-coordinate convention as `american_swaption`: tree time `tau` means absolute
+        //time `t + tau` for phi and for the swap legs.
+        let mut phi_cache: Vec<f64> = binomial_tree::get_all_t(t_of_option, num_steps)
+            .map(|tau| self.phi_t(t + tau))
             .collect();
-        phi_cache.push(self.phi_t(option_maturity - t));
+        phi_cache.push(self.phi_t(t + t_of_option));
         let payoff = |t_step: f64, curr_val: f64, _dt: f64, j: usize| {
+            let t_abs = t + t_step;
             let swp = self.swap_price_t_init(
                 curr_val + phi_cache[j],
-                t_step,
-                t_step,
+                t_abs,
+                t_abs,
                 num_swap_payments,
                 delta,
                 swap_rate,
@@ -1589,6 +1598,251 @@ mod tests {
         let sp = hull_white.swap_price_t(curr_rate, future_time, swap_maturity, delta, swap_rate);
         assert_eq!(sp_init, sp);
     }
+
+    /// Curves consistent with a Hull-White process (Vasicek short rate with mean reversion `a`
+    /// towards `b`), so that `bond_price_now`/`bond_price_t` are exact for the same model.
+    fn hw_curves(
+        curr_rate: f64,
+        a: f64,
+        b: f64,
+        sig: f64,
+    ) -> (impl Fn(f64) -> f64, impl Fn(f64) -> f64) {
+        let yield_curve = move |t: f64| {
+            let at = (1.0 - (-a * t).exp()) / a;
+            let ct =
+                (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
+            at * curr_rate - ct
+        };
+        let forward_curve = move |t: f64| {
+            b + (-a * t).exp() * (curr_rate - b)
+                - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
+        };
+        (yield_curve, forward_curve)
+    }
+
+    /// A deliberately steep (strongly time-inhomogeneous) calibration: the short rate sits far below
+    /// the long-run mean, so phi(t) moves a lot over the option's life. The existing fixture uses
+    /// curr_rate == b, which makes phi(t) exactly constant and hides any time-coordinate error.
+    const STEEP_CURR_RATE: f64 = 0.02;
+    const STEEP_SIG: f64 = 0.03;
+    const STEEP_A: f64 = 0.2;
+    const STEEP_B: f64 = 0.06;
+
+    #[test]
+    fn steep_fixture_actually_makes_phi_time_dependent() {
+        //Protects the tests above: if phi were constant, a time-coordinate error would cancel out
+        //and the regression tests would pass for the wrong reason.
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+        let phi_0 = hull_white.phi_t(0.0);
+        let phi_5 = hull_white.phi_t(5.0);
+        assert!(
+            (phi_5 - phi_0).abs() > 0.005,
+            "steep fixture must make phi(t) time dependent: phi(0)={phi_0}, phi(5)={phi_5}"
+        );
+    }
+
+    #[test]
+    fn european_swaption_tree_matches_analytic_when_t_is_zero() {
+        //Guard: when the valuation time is 0 the shifted tree clock and the absolute model clock
+        //coincide, so this pins the (already correct) behaviour across the time-coordinate fix.
+        let curr_rate = STEEP_CURR_RATE;
+        let sig = STEEP_SIG;
+        let a = STEEP_A;
+        let b = STEEP_B;
+        let delta = 0.25;
+        let future_time = 0.0;
+        let option_maturity = 1.5;
+        let num_swap_payments = 20;
+        let (yield_curve, forward_curve) = hw_curves(curr_rate, a, b, sig);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+        let swap_rate = hull_white.forward_swap_rate_t(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+        );
+        //Tree convergence for this fixture: |tree - analytic| is ~1.4e-4 at 50 steps, ~1.1e-4 at
+        //100, ~7.0e-5 at 200, ~3.1e-5 at 400, ~4e-7 at 800.  1e-4 at 400 steps gives >3x headroom
+        //over the measured discretisation noise while still being ~40x tighter than the time-shift bug.
+        let steps = 400;
+        let payer = hull_white
+            .european_payer_swaption_t(
+                curr_rate,
+                future_time,
+                option_maturity,
+                num_swap_payments,
+                delta,
+                swap_rate,
+            )
+            .unwrap();
+        let tree_payer = hull_white.european_swaption_tree(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            true,
+            steps,
+        );
+        assert_abs_diff_eq!(payer, tree_payer, epsilon = 0.0001);
+    }
+
+    #[test]
+    fn european_swaption_tree_matches_analytic_when_t_is_nonzero() {
+        //Regression for the shifted-vs-absolute time bug: the tree runs on the clock
+        //`option_maturity - t` but phi() and the swap legs need absolute time from "now" (0).
+        let curr_rate = STEEP_CURR_RATE;
+        let sig = STEEP_SIG;
+        let a = STEEP_A;
+        let b = STEEP_B;
+        let delta = 0.25;
+        let future_time = 0.5;
+        let option_maturity = 1.5;
+        let num_swap_payments = 20;
+        let (yield_curve, forward_curve) = hw_curves(curr_rate, a, b, sig);
+        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+        let swap_rate = hull_white.forward_swap_rate_t(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+        );
+        //Same budget as the t = 0 guard above.  With the tree clocking the shifted time into phi and
+        //into the swap legs, this diff plateaus at ~4.0e-3 (payer) / ~5.0e-3 (receiver) no matter how
+        //many steps are used -- a systematic pricing error of ~13-16% of the option value, not
+        //discretisation noise.  After the fix the residual is ~2e-5 at 400 steps.
+        let steps = 400;
+        let payer = hull_white
+            .european_payer_swaption_t(
+                curr_rate,
+                future_time,
+                option_maturity,
+                num_swap_payments,
+                delta,
+                swap_rate,
+            )
+            .unwrap();
+        let receiver = hull_white
+            .european_receiver_swaption_t(
+                curr_rate,
+                future_time,
+                option_maturity,
+                num_swap_payments,
+                delta,
+                swap_rate,
+            )
+            .unwrap();
+        let tree_payer = hull_white.european_swaption_tree(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            true,
+            steps,
+        );
+        let tree_receiver = hull_white.european_swaption_tree(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            false,
+            steps,
+        );
+        assert_abs_diff_eq!(payer, tree_payer, epsilon = 0.0001);
+        assert_abs_diff_eq!(receiver, tree_receiver, epsilon = 0.0001);
+    }
+
+    #[test]
+    fn american_swaption_tree_at_nonzero_t_carries_a_positive_early_exercise_premium() {
+        //The American tree shares the time-coordinate fix with the European tree; this pins that the
+        //American price at t > 0 is a sane number above the European analytic price rather than a
+        //shifted-clock artefact.
+        let delta = 0.25;
+        let future_time = 0.5;
+        let option_maturity = 1.5;
+        let num_swap_payments = 20;
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+        let swap_rate = hull_white.forward_swap_rate_t(
+            STEEP_CURR_RATE,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+        );
+        let american = |is_payer: bool, steps: usize| {
+            if is_payer {
+                hull_white.american_payer_swaption_t(
+                    STEEP_CURR_RATE,
+                    future_time,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                )
+            } else {
+                hull_white.american_receiver_swaption_t(
+                    STEEP_CURR_RATE,
+                    future_time,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                )
+            }
+        };
+        for is_payer in [true, false] {
+            let side = if is_payer { "payer" } else { "receiver" };
+            let european = if is_payer {
+                hull_white.european_payer_swaption_t(
+                    STEEP_CURR_RATE,
+                    future_time,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                )
+            } else {
+                hull_white.european_receiver_swaption_t(
+                    STEEP_CURR_RATE,
+                    future_time,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                )
+            }
+            .unwrap();
+            let american_200 = american(is_payer, 200);
+            let american_400 = american(is_payer, 400);
+            assert!(
+                american_200.is_finite() && american_400.is_finite(),
+                "{side} swaption: non-finite price: 200={american_200}, 400={american_400}"
+            );
+            assert!(
+                american_400 > european,
+                "{side} swaption: early exercise premium must be positive: european={european}, \
+                 american(400)={american_400}"
+            );
+            //Converging, not oscillating: refining the tree moves the price by less than the premium.
+            assert!(
+                (american_400 - american_200).abs() < (american_400 - european),
+                "{side} swaption: american tree not converging: 200={american_200}, \
+                 400={american_400}, european={european}"
+            );
+        }
+    }
+
     #[test]
     fn payer_swaption() {
         let curr_rate = 0.05;
