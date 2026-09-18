@@ -54,6 +54,26 @@
 //! to a non-finite value is reported as `HullWhiteError::NumericalError`.  For a bad instrument
 //! neither a panic nor a silent `0.0` is a valid answer.
 //!
+//! ## The Jamshidian solve
+//!
+//! A coupon-bond option (and so a swaption) is priced with Jamshidian's decomposition, which
+//! needs the **critical rate**: the rate at which the underlying bond, valued on the option's
+//! expiry date, is worth exactly the strike.  That solve is bracketed analytically from the
+//! bond's own leg structure and then safeguarded with bisection, rather than run as the
+//! open-ended Newton iteration this crate used to use.
+//!
+//! Boundary cases return the economically correct answer instead of an error:
+//!
+//! * `strike = 0` needs no solve at all: the call is the underlying, the put is worthless.
+//! * A strike too far away for any rate to reach prices to zero (call) or to parity (put).
+//!
+//! Tolerance, iteration budget and starting point are configurable with
+//! [`HullWhite::with_solver`] / [`SolverSettings`]; the default is a `1e-12` tolerance inside a
+//! 100-iteration budget, and prices agree with a direct quadrature of the payoff to about
+//! `1e-12`.  When a solve genuinely cannot converge it is `HullWhiteError::RootFindingError`,
+//! and the message carries the option maturity, the strike and the seed alongside the bracket,
+//! its width and the residual at the point the solver gave up.
+//!
 //! ## Mathematical Foundation
 //!
 //! The Hull-White model assumes that the short rate follows the stochastic differential equation:
@@ -67,11 +87,9 @@
 
 pub mod error;
 use error::HullWhiteError;
+mod rootfinder;
+pub use rootfinder::{Solution, SolverError, SolverSettings};
 mod validation;
-
-const PREC_1: f64 = 0.0000001;
-const R_INIT: f64 = 0.03;
-const MAX_ITER: i32 = 50;
 
 //tdiff=T-t
 fn a_t(a: f64, t_diff: f64) -> f64 {
@@ -174,18 +192,10 @@ fn payoff_swaption(is_payer: bool, swp: f64) -> f64 {
     }
 }
 
-/// Index of the payment that also carries the par (redemption) leg.
-///
-/// The kernels below used to compute `coupon_times.len() - 1` directly, so an empty schedule
-/// underflowed the `usize` (`usize::MAX`) and the call panicked before pricing anything.
-fn last_payment_index(coupon_times: &[f64]) -> Result<usize, HullWhiteError> {
-    coupon_times.len().checked_sub(1).ok_or_else(|| {
-        HullWhiteError::InvalidInput(
-            "coupon_times is empty; an instrument with no remaining payments has no price here"
-                .to_string(),
-        )
-    })
-}
+//The coupon-sum kernels below are infallible: an empty schedule sums to 0.0 instead of overflowing
+//an index, and `is_last` is derived with `index + 1 == len` so there is no `len() - 1` anywhere to
+//underflow.  Emptiness and every other bad-instrument case is the public boundary's job (see
+//`validation`), which is what lets the root-finding closures below be infallible too.
 
 fn coupon_bond_generic_t(
     r_t: f64,
@@ -193,33 +203,33 @@ fn coupon_bond_generic_t(
     coupon_times: &[f64], //includes bond_maturity
     coupon_rate: f64,
     generic_fn: &impl Fn(f64, f64, f64) -> f64,
-) -> Result<f64, HullWhiteError> {
+) -> f64 {
     let par_value = 1.0; //without loss of generality
-    let last_index_coupon = last_payment_index(coupon_times)?;
-    Ok(coupon_times
+    let last_index = coupon_times.len();
+    coupon_times
         .iter()
         .enumerate()
         .map(|(index, coupon_time)| {
-            let is_last = index == last_index_coupon;
+            let is_last = index + 1 == last_index;
             (coupon_rate + if is_last { par_value } else { 0.0 }) * generic_fn(r_t, t, *coupon_time)
         })
-        .sum())
+        .sum()
 }
 fn coupon_bond_generic_now(
     coupon_times: &[f64], //includes bond_maturity
     coupon_rate: f64,
     generic_fn: &impl Fn(f64) -> f64,
-) -> Result<f64, HullWhiteError> {
+) -> f64 {
     let par_value = 1.0; //without loss of generality
-    let last_index_coupon = last_payment_index(coupon_times)?;
-    Ok(coupon_times
+    let last_index = coupon_times.len();
+    coupon_times
         .iter()
         .enumerate()
         .map(|(index, coupon_time)| {
-            let is_last = index == last_index_coupon;
+            let is_last = index + 1 == last_index;
             (coupon_rate + if is_last { par_value } else { 0.0 }) * generic_fn(*coupon_time)
         })
-        .sum())
+        .sum()
 }
 pub struct HullWhite<'a, T, U>
 where
@@ -231,6 +241,9 @@ where
     //yield_curve is not divided by time, so this gets perpetually larger (unless rates are negative)
     yield_curve: &'a T,
     forward_curve: &'a U,
+    /// Tolerance / iteration budget for the Jamshidian critical-rate solve.  [`HullWhite::init`]
+    /// uses [`SolverSettings::default`]; [`HullWhite::with_solver`] changes it.
+    solver: SolverSettings,
 }
 
 impl<'a, T, U> HullWhite<'a, T, U>
@@ -250,7 +263,46 @@ where
             sigma,
             yield_curve,
             forward_curve,
+            solver: SolverSettings::default(),
         })
+    }
+    /// Returns a model with a different root-finding budget.
+    ///
+    /// Deep in-the-money coupon-bond options with long coupon schedules are where the Jamshidian
+    /// solve has to travel furthest, so that is where a tighter `tolerance` or a larger
+    /// `max_iterations` earns its keep.  A bad configuration is rejected up front rather than
+    /// showing up later as an unconverged price.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hull_white::{HullWhite, SolverSettings};
+    ///
+    /// let yield_curve = |t: f64| 0.05 * t;
+    /// let forward_curve = |t: f64| t.ln();
+    /// let hull_white = HullWhite::init(0.2, 0.3, &yield_curve, &forward_curve).unwrap();
+    /// let tuned = hull_white
+    ///     .with_solver(SolverSettings {
+    ///         tolerance: 1e-14,
+    ///         max_iterations: 200,
+    ///         initial_guess: None,
+    ///     })
+    ///     .unwrap();
+    /// let price = tuned
+    ///     .coupon_bond_call_t(0.04, 1.0, 1.5, &[1.75, 2.0, 2.25], 0.05, 1.0)
+    ///     .unwrap();
+    /// assert!(price > 0.0);
+    /// ```
+    #[must_use = "with_solver returns a new model carrying the settings"]
+    pub fn with_solver(self, solver: SolverSettings) -> Result<Self, HullWhiteError> {
+        solver
+            .validate()
+            .map_err(|reason| HullWhiteError::InvalidInput(format!("solver settings: {reason}")))?;
+        Ok(Self { solver, ..self })
+    }
+    /// The root-finding configuration currently in use.
+    pub fn solver_settings(&self) -> SolverSettings {
+        self.solver
     }
     fn validate_parameters(a: f64, sigma: f64) -> Result<(), HullWhiteError> {
         if a <= 0.0 {
@@ -462,14 +514,18 @@ where
         validation::valuation_time(t)?;
         validation::finite("coupon_rate", coupon_rate)?;
         validation::payment_schedule(coupon_times, t)?;
-        coupon_bond_generic_t(
-            r_t,
-            t,
-            coupon_times,
-            coupon_rate,
-            &|r_t: f64, t: f64, bond_maturity: f64| self.bond_price_t_raw(r_t, t, bond_maturity),
+        validation::finish(
+            "coupon_bond_price_t",
+            coupon_bond_generic_t(
+                r_t,
+                t,
+                coupon_times,
+                coupon_rate,
+                &|r_t: f64, t: f64, bond_maturity: f64| {
+                    self.bond_price_t_raw(r_t, t, bond_maturity)
+                },
+            ),
         )
-        .and_then(|price| validation::finish("coupon_bond_price_t", price))
     }
     fn coupon_bond_price_t_deriv(
         &self,
@@ -477,7 +533,7 @@ where
         t: f64,
         coupon_times: &[f64],
         coupon_rate: f64,
-    ) -> Result<f64, HullWhiteError> {
+    ) -> f64 {
         coupon_bond_generic_t(
             r_t,
             t,
@@ -508,10 +564,12 @@ where
         validation::finite("coupon_rate", coupon_rate)?;
         //"now" is t = 0 for this entry point.
         validation::payment_schedule(coupon_times, 0.0)?;
-        coupon_bond_generic_now(coupon_times, coupon_rate, &|bond_maturity: f64| {
-            self.bond_price_now_raw(bond_maturity)
-        })
-        .and_then(|price| validation::finish("coupon_bond_price_now", price))
+        validation::finish(
+            "coupon_bond_price_now",
+            coupon_bond_generic_now(coupon_times, coupon_rate, &|bond_maturity: f64| {
+                self.bond_price_now_raw(bond_maturity)
+            }),
+        )
     }
     /// Returns price of a call option on zero coupon bond at some future time
     ///
@@ -595,6 +653,146 @@ where
         validation::finish("bond_call_now", price)
     }
     //The price of a call option on coupon bond under Hull White...uses jamshidian's trick*
+    /// A rigorous bracket on the Jamshidian critical rate, or `None` when it cannot be built (in
+    /// which case [`rootfinder::solve`] widens around the seed instead).
+    ///
+    /// Write the bond's value on the option's expiry date `u` as a sum of zero-coupon legs.  With
+    /// `B_i = B(u, T_i)` and `C_i = C(u, T_i)`, and the affine zero-coupon price
+    /// `P_i(r) = exp(C_i - B_i r)`, that sum is
+    ///
+    /// ```text
+    /// P_c(r) = sum_i w_i * exp(C_i - B_i * r),   w_i = coupon_rate, w_last = 1 + coupon_rate
+    /// ```
+    ///
+    /// and the objective is `f(r) = P_c(r) - strike`.  Each end of the bracket comes from a
+    /// one-sided bound:
+    ///
+    /// * **low end** — one term of a non-negative sum bounds the whole thing from below, so
+    ///   `P_c(r) >= w_last * exp(C_last - B_last r)`.  Solving that for the strike gives an `r`
+    ///   where `f >= 0`, valid at any rate.
+    /// * **high end** — pulling the largest `C` and a single `B` out of the exponent bounds the
+    ///   whole sum by `W * exp(C_max - B r)`, where `W = sum_i w_i` — *provided* `B` is chosen
+    ///   for the sign of the rate, `B_min` when `r >= 0` and `B_max` when `r <= 0`.  Solving for
+    ///   the strike gives an `r` where `f <= 0`, and taking the `B` whose regime the answer really
+    ///   lands in keeps the inequality live.
+    ///
+    /// This costs one pass over the schedule and no function evaluations at all, which is what
+    /// replaces the "iterate blindly from 3% and hope" behaviour.
+    fn critical_rate_bracket(
+        &self,
+        u: f64,
+        coupon_times: &[f64],
+        coupon_rate: f64,
+        strike: f64,
+    ) -> Option<(f64, f64)> {
+        if strike <= 0.0 || coupon_times.is_empty() {
+            return None;
+        }
+        let last_index = coupon_times.len() - 1;
+        let mut total_weight = 1.0 + coupon_rate; //the redemption-bearing leg
+        let mut c_max = f64::NEG_INFINITY;
+        let mut b_min = f64::INFINITY;
+        let mut b_max: f64 = 0.0;
+        for (index, coupon_time) in coupon_times.iter().enumerate() {
+            if index != last_index {
+                total_weight += coupon_rate;
+            }
+            let b = at_t(self.a, u, *coupon_time);
+            let c = ct_t(
+                self.a,
+                self.sigma,
+                u,
+                *coupon_time,
+                self.yield_curve,
+                self.forward_curve,
+            );
+            c_max = c_max.max(c);
+            b_min = b_min.min(b);
+            b_max = b_max.max(b);
+        }
+        let w_last = 1.0 + coupon_rate;
+        let last_time = coupon_times[last_index];
+        let b_last = at_t(self.a, u, last_time);
+        let c_last = ct_t(
+            self.a,
+            self.sigma,
+            u,
+            last_time,
+            self.yield_curve,
+            self.forward_curve,
+        );
+        //Both bounds need non-negative weights.  A coupon_rate at or below -100% breaks them, so
+        //hand that nonsense to the widening path instead of trusting a bracket built on sand.
+        if !(b_min > 0.0 && b_max > 0.0 && total_weight > 0.0 && w_last > 0.0) {
+            return None;
+        }
+        let log_strike = strike.ln();
+        //Differences of logs, not a log of a ratio: a strike of 1e-320 would overflow 1/ratio.
+        let lower = (c_last + (w_last.ln() - log_strike)) / b_last;
+        let numerator = c_max + total_weight.ln() - log_strike;
+        let b_for_regime = if numerator >= 0.0 { b_min } else { b_max };
+        let upper = numerator / b_for_regime;
+        //exp/log rounding leaves each end a few ulp off `f = 0` rather than safely beyond it, so
+        //shove both ends outwards.  Outward is always safe: `P_c` falls with the rate at the low
+        //end, and at the high end it is already comfortably under the strike.
+        let nudge = |x: f64| 1e-7 * (1.0 + x.abs());
+        let (lower, upper) = (lower - nudge(lower), upper + nudge(upper));
+        if lower.is_finite() && upper.is_finite() && lower <= upper {
+            Some((lower, upper))
+        } else {
+            None
+        }
+    }
+
+    /// Solves for the critical rate of the Jamshidian decomposition.
+    ///
+    /// The critical rate `r*` is the rate at which the coupon bond, valued at the option's
+    /// expiry date, is worth exactly the strike.  Striking every zero-coupon leg at its own price
+    /// at that rate makes the leg portfolio level with the whole bond, which is what lets a sum
+    /// of leg options equal the bond option.
+    ///
+    /// The seed, tolerance and iteration budget come from `SolverSettings`; the bracket comes
+    /// from `critical_rate_bracket` where the schedule allows it, and from geometric widening
+    /// otherwise.
+    fn solve_critical_rate(
+        &self,
+        r_t: f64,
+        t: f64,
+        option_maturity: f64,
+        coupon_times: &[f64],
+        coupon_rate: f64,
+        strike: f64,
+    ) -> Result<rootfinder::Solution, HullWhiteError> {
+        let objective = |rate: f64| {
+            coupon_bond_generic_t(
+                rate,
+                option_maturity,
+                coupon_times,
+                coupon_rate,
+                &|leg_rate: f64, leg_t: f64, bond_maturity: f64| {
+                    self.bond_price_t_raw(leg_rate, leg_t, bond_maturity)
+                },
+            ) - strike
+        };
+        let derivative = |rate: f64| {
+            self.coupon_bond_price_t_deriv(rate, option_maturity, coupon_times, coupon_rate)
+        };
+        //Seed with the model's own expected short rate at expiry: same units as the unknown,
+        //curve aware and state aware, where a fixed guess can sit a very long way from the answer.
+        let seed = match self.solver.initial_guess {
+            Some(guess) => guess,
+            None => self.mu_r(r_t, t, option_maturity)?,
+        };
+        let bracket =
+            self.critical_rate_bracket(option_maturity, coupon_times, coupon_rate, strike);
+        rootfinder::solve(&objective, &derivative, bracket, seed, &self.solver).map_err(|error| {
+            HullWhiteError::RootFindingError(format!(
+                "critical rate for the Jamshidian decomposition of a coupon-bond option \
+                 (option_maturity = {option_maturity}, strike = {strike}, seed = {seed}): {error}"
+            ))
+        })
+    }
+
     fn coupon_bond_option_generic_t(
         &self,
         r_t: f64,
@@ -616,43 +814,42 @@ where
         //expiry is not part of the underlying at expiry; taking it through here priced a leg that no
         //longer exists (see the follow-up issue for supporting such bonds properly).
         validation::payment_schedule(coupon_times, option_maturity)?;
-        let final_coupon_index = last_payment_index(coupon_times)?;
-        //`nrfind` only accepts infallible closures.  The schedule is validated above, so the
-        //`expect`s below are unreachable for anything that survives validation.
-        let fn_to_optimize = |r| {
-            coupon_bond_generic_t(
-                r,
+        //Each leg is struck at the zero-coupon price that puts the *whole* bond level with the
+        //strike at the critical rate.  A strike of zero means that critical rate sits at
+        //+infinity, where every modified strike is zero -- and Black-Scholes is exact there (a call
+        //struck at nothing on nothing is worth the underlying, the put is worth nothing), so the
+        //solve is skipped rather than chased out to infinity.
+        let critical_rate = if strike == 0.0 {
+            None
+        } else {
+            Some(self.solve_critical_rate(
+                r_t,
+                t,
                 option_maturity,
                 coupon_times,
                 coupon_rate,
-                &|r_t: f64, t: f64, bond_maturity: f64| {
-                    self.bond_price_t_raw(r_t, t, bond_maturity)
-                },
-            )
-            .expect("coupon_times validated non-empty before root finding")
-                - strike
+                strike,
+            )?)
         };
-        let fn_derv = |r| {
-            self.coupon_bond_price_t_deriv(r, option_maturity, coupon_times, coupon_rate)
-                .expect("coupon_times validated non-empty before root finding")
-        };
-        let r_optimal = nrfind::find_root(&fn_to_optimize, &fn_derv, R_INIT, PREC_1, MAX_ITER)
-            .map_err(|e| HullWhiteError::RootFindingError(e.to_string()))?;
+        let last_index = coupon_times.len();
         coupon_times
             .iter()
             .enumerate()
             .map(|(index, coupon_time)| {
-                let is_last = final_coupon_index == index;
-                generic_fn(
-                    r_t,
-                    t,
-                    option_maturity,
-                    *coupon_time,
-                    self.bond_price_t_raw(r_optimal, option_maturity, *coupon_time),
-                )
-                .map(|leg| leg * (coupon_rate + if is_last { par_value } else { 0.0 }))
+                let is_last = index + 1 == last_index;
+                let strike_leg = match critical_rate {
+                    Some(solution) => {
+                        self.bond_price_t_raw(solution.root, option_maturity, *coupon_time)
+                    }
+                    None => 0.0,
+                };
+                generic_fn(r_t, t, option_maturity, *coupon_time, strike_leg)
+                    .map(|leg| leg * (coupon_rate + if is_last { par_value } else { 0.0 }))
             })
-            .sum()
+            .sum::<Result<f64, HullWhiteError>>()
+            .and_then(|price| {
+                validation::finish("Jamshidian decomposition of a coupon-bond option", price)
+            })
     }
     /// Returns price of a call option on a coupon bond at some future time
     ///
@@ -3109,5 +3306,638 @@ mod tests {
                 .unwrap()
                 >= 0.0
         );
+    }
+    // ---------------------------------------------------------------------------
+    // Jamshidian robustness (workspace-76t)
+    // ---------------------------------------------------------------------------
+
+    fn simpson(f: &dyn Fn(f64) -> f64, a: f64, b: f64, panels: usize) -> f64 {
+        let panels = panels.max(2) + (panels % 2); //Simpson needs an even panel count
+        let h = (b - a) / panels as f64;
+        let mut sum = f(a) + f(b);
+        for i in 1..panels {
+            let x = a + i as f64 * h;
+            sum += if i % 2 == 1 { 4.0 } else { 2.0 } * f(x);
+        }
+        sum * h / 3.0
+    }
+
+    /// Mean and standard deviation of the short rate at `option_maturity`, under the
+    /// *option-maturity-forward* measure.
+    ///
+    /// A claim settled on the option's expiry date is priced with the zero-coupon bond maturing
+    /// then as numeraire, so that -- not the risk-neutral money-market measure -- is the law the
+    /// option's payoff has to be integrated against.  Under this model `r_U` is Gaussian either
+    /// way with the same variance, and the drift moves by
+    /// `sigma^2 * int_t^U exp(-a(U-s)) B(s,U) ds`, which closes to the form below.
+    fn expiry_rate_moments(
+        hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+        r_t: f64,
+        t: f64,
+        option_maturity: f64,
+    ) -> (f64, f64) {
+        let tau = option_maturity - t;
+        let a = hull_white.a;
+        let sigma = hull_white.sigma;
+        let risk_neutral_mean = hull_white.mu_r(r_t, t, option_maturity).unwrap();
+        let variance = hull_white.variance_r(t, option_maturity).unwrap();
+        let numeraire_drift = (sigma * sigma / (a * a))
+            * ((1.0 - (-a * tau).exp()) - 0.5 * (1.0 - (-2.0 * a * tau).exp()));
+        (risk_neutral_mean - numeraire_drift, variance.sqrt())
+    }
+
+    /// Prices the payoff directly by integrating over the expiry-date distribution of the short
+    /// rate, as an independent check on the Jamshidian machinery.
+    ///
+    /// ```text
+    /// price = P(t,U) * E^U[(P_c(mu + sd*Z) - strike)^+]
+    /// ```
+    ///
+    /// Nothing in here uses Jamshidian's decomposition, the analytic bracket or the root solver,
+    /// so agreement pins those down rather than echoing them.  The payoff kinks where
+    /// `P_c(r) = strike`; that kink is found by this test's own plain bisection and each side is
+    /// integrated separately, so the kink is never interior to a panel.  `Z` is truncated at
+    /// +/-12 sigma, where `phi` underflows, putting the tail error far below any price worth
+    /// quoting.
+    #[allow(clippy::too_many_arguments)] //a test helper with an instrument's whole description
+    fn direct_payoff_price(
+        hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+        r_t: f64,
+        t: f64,
+        option_maturity: f64,
+        coupon_times: &[f64],
+        coupon_rate: f64,
+        strike: f64,
+        is_call: bool,
+    ) -> f64 {
+        let coupon_bond_at = |rate: f64| {
+            hull_white
+                .coupon_bond_price_t(rate, option_maturity, coupon_times, coupon_rate)
+                .unwrap()
+        };
+        let (mean, sd) = expiry_rate_moments(hull_white, r_t, t, option_maturity);
+        assert!(
+            sd > 0.0,
+            "the reference needs a non-degenerate expiry distribution"
+        );
+
+        //Kink: P_c(r) = strike.  P_c falls strictly with the rate, so widen until the ends
+        //disagree and then halve.
+        let g = |rate: f64| coupon_bond_at(rate) - strike;
+        let mut lo = mean - sd;
+        let mut hi = mean + sd;
+        while g(lo) < 0.0 {
+            lo = mean - 2.0 * (mean - lo);
+            assert!(lo > -1e6, "no kink found below the mean");
+        }
+        while g(hi) > 0.0 {
+            hi = mean + 2.0 * (hi - mean);
+            assert!(hi < 1e6, "no kink found above the mean");
+        }
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if g(mid) > 0.0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let kink_z = (0.5 * (lo + hi) - mean) / sd;
+
+        let pdf = |z: f64| (-0.5 * z * z).exp() / (2.0 * std::f64::consts::PI).sqrt();
+        let integrand = |z: f64| {
+            let density = pdf(z);
+            if density == 0.0 {
+                //Stops inf * 0 = NaN in a deep tail where the payoff itself overflows.
+                return 0.0;
+            }
+            let value = coupon_bond_at(mean + sd * z);
+            let payoff = if is_call {
+                (value - strike).max(0.0)
+            } else {
+                (strike - value).max(0.0)
+            };
+            payoff * density
+        };
+        //A call is in the money below the kink, a put above it.
+        let (a, b) = if is_call {
+            (-12.0, kink_z.min(12.0))
+        } else {
+            (kink_z.max(-12.0), 12.0)
+        };
+        if a >= b {
+            return 0.0;
+        }
+        let coarse = simpson(&integrand, a, b, 800);
+        let fine = simpson(&integrand, a, b, 1600);
+        assert!(
+            (coarse - fine).abs() < 1e-8f64.max(fine.abs() * 1e-9),
+            "reference quadrature not converged: {coarse} vs {fine}"
+        );
+        hull_white.bond_price_t(r_t, t, option_maturity).unwrap() * fine
+    }
+
+    const FIXTURES: [(f64, f64, f64, f64); 4] = [
+        //curr_rate, a, b, sigma
+        (0.05, 0.05, 0.05, 0.01),
+        (STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG),
+        (0.05, 0.1, 0.08, 0.08),
+        (0.03, 0.4, 0.045, 0.005),
+    ];
+
+    #[test]
+    fn the_forward_measure_drift_reproduces_the_bond_price() {
+        //Guards the reference itself: repricing the coupon bond through the expiry-date
+        //distribution of the rate must return today's bond price exactly.  Without the numeraire
+        //drift this is out by ~1e-4, which is exactly the size of error that was showing up in
+        //every option comparison below until the measure was fixed.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        for &(curr, a, b, sigma) in FIXTURES.iter() {
+            let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
+            let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+            let (r_t, t, u) = (0.04, 1.0, 2.0);
+            let bond = hull_white
+                .coupon_bond_price_t(r_t, t, &times, 0.05)
+                .unwrap();
+            let (mean, sd) = expiry_rate_moments(&hull_white, r_t, t, u);
+            let expected_value = simpson(
+                &|z: f64| {
+                    let density = (-0.5 * z * z).exp() / (2.0 * std::f64::consts::PI).sqrt();
+                    hull_white
+                        .coupon_bond_price_t(mean + sd * z, u, &times, 0.05)
+                        .unwrap()
+                        * density
+                },
+                -12.0,
+                12.0,
+                4000,
+            );
+            let repriced = hull_white.bond_price_t(r_t, t, u).unwrap() * expected_value;
+            assert!(
+                (repriced - bond).abs() < 1e-12,
+                "fixture {curr},{a},{b},{sigma}: repriced {repriced} vs bond {bond}"
+            );
+        }
+    }
+
+    #[test]
+    fn jamshidian_matches_the_direct_payoff_integral() {
+        //The headline check: the decomposition, its bracket and its solver, against a quadrature
+        //over the payoff that shares none of them.  The worst deviation across this whole grid is
+        //about 2e-12.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        for &(curr, a, b, sigma) in FIXTURES.iter() {
+            let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
+            let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+            for strike in [0.5f64, 0.8, 0.95, 1.0, 1.05, 1.3, 3.0] {
+                for is_call in [true, false] {
+                    let priced = if is_call {
+                        hull_white
+                            .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, strike)
+                            .unwrap()
+                    } else {
+                        hull_white
+                            .coupon_bond_put_t(0.04, 1.0, 2.0, &times, 0.05, strike)
+                            .unwrap()
+                    };
+                    let reference = direct_payoff_price(
+                        &hull_white,
+                        0.04,
+                        1.0,
+                        2.0,
+                        &times,
+                        0.05,
+                        strike,
+                        is_call,
+                    );
+                    assert!(
+                        (priced - reference).abs() <= 1e-10f64.max(reference.abs() * 1e-9),
+                        "fixture {curr},{a},{b},{sigma} {side} strike {strike}: {priced} vs {reference}",
+                        side = if is_call { "call" } else { "put" }
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_fine_strike_ladder_around_the_money_matches_the_integral() {
+        //At the money the price is most sensitive to the critical rate, so a fine ladder through
+        //the ATM region is where a sloppy root shows up first.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        for &(curr, a, b, sigma) in FIXTURES.iter() {
+            let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
+            let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+            let (r_t, t, u) = (0.04, 1.0, 2.0);
+            let underlying = hull_white
+                .coupon_bond_price_t(r_t, t, &times, 0.05)
+                .unwrap();
+            for step in 0..21 {
+                let strike = underlying * (0.9 + step as f64 * 0.01);
+                for is_call in [true, false] {
+                    let priced = if is_call {
+                        hull_white
+                            .coupon_bond_call_t(r_t, t, u, &times, 0.05, strike)
+                            .unwrap()
+                    } else {
+                        hull_white
+                            .coupon_bond_put_t(r_t, t, u, &times, 0.05, strike)
+                            .unwrap()
+                    };
+                    let reference =
+                        direct_payoff_price(&hull_white, r_t, t, u, &times, 0.05, strike, is_call);
+                    assert!(
+                        (priced - reference).abs() <= 1e-10f64.max(reference.abs() * 1e-9),
+                        "fixture {curr},{a},{b},{sigma} {side} strike {strike}: {priced} vs {reference}",
+                        side = if is_call { "call" } else { "put" }
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_negative_coupon_schedule_still_prices() {
+        //A coupon below zero is not nonsense -- deep-discount instruments and some cross-currency
+        //legs pay one -- and nothing in the decomposition needs the coupon to be positive as
+        //long as the weights keep their sign.  The reference checks it independently.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+        let (r_t, t, u) = (0.04, 1.0, 2.0);
+        for coupon_rate in [-0.02f64, -0.005, -0.0001] {
+            for strike in [0.5f64, 0.9, 0.95, 1.0, 1.2] {
+                for is_call in [true, false] {
+                    let priced = if is_call {
+                        hull_white
+                            .coupon_bond_call_t(r_t, t, u, &times, coupon_rate, strike)
+                            .unwrap()
+                    } else {
+                        hull_white
+                            .coupon_bond_put_t(r_t, t, u, &times, coupon_rate, strike)
+                            .unwrap()
+                    };
+                    let reference = direct_payoff_price(
+                        &hull_white,
+                        r_t,
+                        t,
+                        u,
+                        &times,
+                        coupon_rate,
+                        strike,
+                        is_call,
+                    );
+                    assert!(
+                        (priced - reference).abs() <= 1e-10f64.max(reference.abs() * 1e-9),
+                        "coupon {coupon_rate} {side} strike {strike}: {priced} vs {reference}",
+                        side = if is_call { "call" } else { "put" }
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_zero_strike_call_is_the_underlying_and_a_zero_strike_put_is_worthless() {
+        //A zero strike puts the critical rate at the far end of the bond's range, which used to
+        //be a guaranteed RootFindingError.  What the answer has to be: the call is the present
+        //value of the underlying, the put is nothing.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        for &(curr, a, b, sigma) in FIXTURES.iter() {
+            let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
+            let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+            let underlying = hull_white
+                .coupon_bond_price_t(0.04, 1.0, &times, 0.05)
+                .unwrap();
+            let call = hull_white
+                .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.0)
+                .unwrap();
+            let put = hull_white
+                .coupon_bond_put_t(0.04, 1.0, 2.0, &times, 0.05, 0.0)
+                .unwrap();
+            assert!(
+                (call - underlying).abs() <= underlying.abs() * 1e-12,
+                "fixture {curr},{a},{b},{sigma}: call {call} vs underlying {underlying}"
+            );
+            assert_eq!(put, 0.0, "fixture {curr},{a},{b},{sigma}: put {put}");
+        }
+    }
+
+    #[test]
+    fn put_call_parity_holds_whatever_the_strike() {
+        //C - P = PV(underlying) - K * P(t,U), to machine precision, including at zero strike.
+        //A solve that lands on the wrong critical rate breaks this immediately.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+        let (r_t, t, u) = (0.04, 1.0, 2.0);
+        let underlying = hull_white
+            .coupon_bond_price_t(r_t, t, &times, 0.05)
+            .unwrap();
+        let discount = hull_white.bond_price_t(r_t, t, u).unwrap();
+        for strike in [0.0f64, 0.3, 0.7, 0.95, 1.0, 1.2, 2.0, 1e3, 1e6] {
+            let call = hull_white
+                .coupon_bond_call_t(r_t, t, u, &times, 0.05, strike)
+                .unwrap();
+            let put = hull_white
+                .coupon_bond_put_t(r_t, t, u, &times, 0.05, strike)
+                .unwrap();
+            let parity = underlying - strike * discount;
+            //At a strike of 1e6 the put is a difference of huge cancelling leg values, so the
+            //residual is a few parts in 1e11 of the numbers involved rather of the option.
+            assert!(
+                (call - put - parity).abs() <= 1e-11f64.max(parity.abs() * 1e-10),
+                "strike {strike}: C-P {} vs parity {parity}",
+                call - put
+            );
+        }
+    }
+
+    #[test]
+    fn an_extreme_strike_prices_rather_than_erroring() {
+        //A strike orders of magnitude away from anywhere the bond can reach has no optionality
+        //left: the answer is zero (or parity), not an error.  This used to come back as
+        //RootFindingError("NaN") because the old Newton iterate blew up on the flat of the
+        //exponential.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+        for strike in [1e3f64, 1e8, 1e12] {
+            let call = hull_white
+                .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, strike)
+                .unwrap();
+            assert_eq!(call, 0.0, "strike {strike} call {call}");
+            let put = hull_white
+                .coupon_bond_put_t(0.04, 1.0, 2.0, &times, 0.05, strike)
+                .unwrap();
+            assert!(put.is_finite() && put > 0.0, "strike {strike} put {put}");
+        }
+    }
+
+    #[test]
+    fn the_price_does_not_depend_on_where_the_solver_starts() {
+        //The old solver started from a hard-coded 3% and its answer moved with that guess.  With
+        //a real bracket and a bisection guard, any seed reaches the same root.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let reference = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
+            .unwrap()
+            .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
+            .unwrap();
+        for seed in [-1.0f64, 0.0, 0.03, 0.5, 5.0, 50.0, 1e3, 1e6] {
+            let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
+                .unwrap()
+                .with_solver(SolverSettings {
+                    initial_guess: Some(seed),
+                    ..SolverSettings::default()
+                })
+                .unwrap();
+            let priced = hull_white
+                .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
+                .unwrap();
+            assert!(
+                (priced - reference).abs() <= 1e-10f64.max(reference.abs() * 1e-9),
+                "seed {seed}: {priced} vs {reference}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_bracket_actually_brackets() {
+        //The analytic bracket has to straddle the critical rate: bond value above the strike at
+        //the low end, below it at the high end, and the solved root in between.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        for &(curr, a, b, sigma) in FIXTURES.iter() {
+            let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
+            let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+            let (r_t, t, u) = (0.04, 1.0, 2.0);
+            for strike in [0.5f64, 0.8, 0.95, 1.0, 1.05, 1.3, 3.0] {
+                let (lower, upper) = hull_white
+                    .critical_rate_bracket(u, &times, 0.05, strike)
+                    .unwrap_or_else(|| {
+                        panic!("no bracket for {curr},{a},{b},{sigma} strike {strike}")
+                    });
+                let gap = |rate: f64| {
+                    hull_white
+                        .coupon_bond_price_t(rate, u, &times, 0.05)
+                        .unwrap()
+                        - strike
+                };
+                assert!(
+                    gap(lower) >= 0.0,
+                    "{curr},{a},{b},{sigma} strike {strike}: low end {lower} gives {}",
+                    gap(lower)
+                );
+                assert!(
+                    gap(upper) <= 0.0,
+                    "{curr},{a},{b},{sigma} strike {strike}: high end {upper} gives {}",
+                    gap(upper)
+                );
+                let solution = hull_white
+                    .solve_critical_rate(r_t, t, u, &times, 0.05, strike)
+                    .unwrap();
+                assert!(
+                    solution.root >= lower && solution.root <= upper,
+                    "{curr},{a},{b},{sigma} strike {strike}: root {} outside [{lower}, {upper}]",
+                    solution.root
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_single_coupon_schedule_reduces_to_the_zero_coupon_option() {
+        //The degenerate schedule: one payment date, carrying coupon plus redemption.  Jamshidian
+        //has exactly one leg, so the answer has to be that leg weighted by (1 + coupon) -- which
+        //is the plain zero-coupon bond option, priced here without any root find at all.
+        //
+        //  (1 + c) * call_discount(P(t,T), K / (1 + c), P(t,U), sigma_leg)
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+        let (r_t, t, u) = (0.04, 1.0, 2.0);
+        for bond_maturity in [2.5f64, 4.0, 10.0] {
+            for coupon_rate in [0.05f64, 0.01, -0.02] {
+                let weight = 1.0 + coupon_rate;
+                for strike in [0.5f64, 0.9, 0.95, 1.0, 1.3, 3.0] {
+                    for is_call in [true, false] {
+                        let schedule = [bond_maturity];
+                        let priced = if is_call {
+                            hull_white
+                                .coupon_bond_call_t(r_t, t, u, &schedule, coupon_rate, strike)
+                                .unwrap()
+                        } else {
+                            hull_white
+                                .coupon_bond_put_t(r_t, t, u, &schedule, coupon_rate, strike)
+                                .unwrap()
+                        };
+                        //The same option through the zero-coupon pricer: one leg, struck at the
+                        //strike the single leg would carry.  No decomposition, no solver.
+                        let leg = if is_call {
+                            hull_white
+                                .bond_call_t(r_t, t, u, bond_maturity, strike / weight)
+                                .unwrap()
+                        } else {
+                            hull_white
+                                .bond_put_t(r_t, t, u, bond_maturity, strike / weight)
+                                .unwrap()
+                        };
+                        let reference = weight * leg;
+                        assert!(
+                            (priced - reference).abs() <= 1e-12f64.max(reference.abs() * 1e-11),
+                            "T {bond_maturity} c {coupon_rate} {} strike {strike}: {priced} vs {reference}",
+                            if is_call { "call" } else { "put" }
+                        );
+                        //...and the direct integral agrees too.
+                        let integral = direct_payoff_price(
+                            &hull_white,
+                            r_t,
+                            t,
+                            u,
+                            &schedule,
+                            coupon_rate,
+                            strike,
+                            is_call,
+                        );
+                        assert!(
+                            (priced - integral).abs() <= 1e-10f64.max(integral.abs() * 1e-9),
+                            "T {bond_maturity} c {coupon_rate} {} strike {strike}: {priced} vs integral {integral}",
+                            if is_call { "call" } else { "put" }
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_forty_eight_coupon_schedule_prices_against_the_integral() {
+        //A long schedule is where the solve travels furthest and where the leg sum has the most
+        //terms to get wrong: 48 coupons, maturities out to 26 years, strikes from deep ITM to
+        //deep OTM.  Still agrees with the direct payoff integral.
+        let schedule: Vec<f64> = (1..=48).map(|i| 2.0 + 0.5 * i as f64).collect();
+        assert_eq!(schedule.len(), 48);
+        for &(curr, a, b, sigma) in FIXTURES.iter() {
+            let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
+            let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+            let (r_t, t, u) = (0.04, 1.0, 2.0);
+            let underlying = hull_white
+                .coupon_bond_price_t(r_t, t, &schedule, 0.05)
+                .unwrap();
+            for factor in [0.2f64, 0.6, 0.9, 0.99, 1.0, 1.01, 1.4, 2.5] {
+                let strike = underlying * factor;
+                for is_call in [true, false] {
+                    let priced = if is_call {
+                        hull_white
+                            .coupon_bond_call_t(r_t, t, u, &schedule, 0.05, strike)
+                            .unwrap()
+                    } else {
+                        hull_white
+                            .coupon_bond_put_t(r_t, t, u, &schedule, 0.05, strike)
+                            .unwrap()
+                    };
+                    let reference = direct_payoff_price(
+                        &hull_white,
+                        r_t,
+                        t,
+                        u,
+                        &schedule,
+                        0.05,
+                        strike,
+                        is_call,
+                    );
+                    assert!(
+                        (priced - reference).abs() <= 1e-9f64.max(reference.abs() * 1e-9),
+                        "fixture {curr},{a},{b},{sigma} {side} strike {strike}: {priced} vs {reference}",
+                        side = if is_call { "call" } else { "put" }
+                    );
+                    //Parity on the same instrument, for a second independent angle.
+                    let other = if is_call {
+                        hull_white
+                            .coupon_bond_put_t(r_t, t, u, &schedule, 0.05, strike)
+                            .unwrap()
+                    } else {
+                        hull_white
+                            .coupon_bond_call_t(r_t, t, u, &schedule, 0.05, strike)
+                            .unwrap()
+                    };
+                    let parity = underlying - strike * hull_white.bond_price_t(r_t, t, u).unwrap();
+                    //C - P = parity, so a put's difference runs the other way.
+                    let expected = if is_call { parity } else { -parity };
+                    assert!(
+                        (priced - other - expected).abs() <= 1e-9f64.max(parity.abs() * 1e-10),
+                        "fixture {curr},{a},{b},{sigma} strike {strike}: {} vs {}",
+                        priced - other,
+                        expected
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_starved_solver_says_which_stage_failed() {
+        //A failure names the stage that failed instead of handing back a bare number: too few
+        //iterations to converge, in the context of the instrument being priced.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let starved = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
+            .unwrap()
+            .with_solver(SolverSettings {
+                max_iterations: 1,
+                ..SolverSettings::default()
+            })
+            .unwrap();
+        let error = starved
+            .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("iterations"),
+            "expected an iteration failure, got {message}"
+        );
+        assert!(
+            message.contains("Jamshidian"),
+            "expected instrument context, got {message}"
+        );
+    }
+
+    #[test]
+    fn a_looser_root_tolerance_is_visible_in_the_price() {
+        //The reason the tolerance is configurable at all: the old hard-coded 1e-7 capped how
+        //accurate a price anyone could get, and now that cap is measurable instead of invisible.
+        let times = [2.5, 3.0, 3.5, 4.0];
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let loose = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
+            .unwrap()
+            .with_solver(SolverSettings {
+                tolerance: 1e-7,
+                ..SolverSettings::default()
+            })
+            .unwrap();
+        let tight = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
+            .unwrap()
+            .with_solver(SolverSettings {
+                tolerance: 1e-14,
+                ..SolverSettings::default()
+            })
+            .unwrap();
+        let mut max_loose = 0.0f64;
+        let mut max_tight = 0.0f64;
+        for strike in [0.8f64, 0.95, 1.0, 1.05] {
+            let reference = direct_payoff_price(&loose, 0.04, 1.0, 2.0, &times, 0.05, strike, true);
+            let loose_price = loose
+                .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, strike)
+                .unwrap();
+            let tight_price = tight
+                .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, strike)
+                .unwrap();
+            max_loose = max_loose.max((loose_price - reference).abs());
+            max_tight = max_tight.max((tight_price - reference).abs());
+        }
+        assert!(
+            max_tight < max_loose,
+            "tight {max_tight:e} should beat loose {max_loose:e}"
+        );
+        assert!(max_tight < 1e-11, "tight tolerance left {max_tight:e}");
     }
 }
