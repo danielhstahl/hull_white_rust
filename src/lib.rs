@@ -108,11 +108,24 @@ fn compute_libor_rate(nearest_bond: f64, farthest_bond: f64, tenor: f64) -> f64 
 //eg when the contract already is in the middle of its life.  If the contract
 // start is at time 0.0, and current time is 1.1, and delta is 0.25, then the
 //next payment is in .15 units of time.
+
+/// Tolerance (relative to the payment count) for deciding that `(maturity - t) / delta` is a whole
+/// number of payment periods.  IEEE-754 rounds a realistic schedule's quotient by a few ulps, i.e.
+/// ~1e-15 relative: `(1.1 - 0.1) / 0.1 == 9.999999999999998`, not 10.  1e-9 sits ~6 orders of
+/// magnitude above that noise while staying far below the smallest gap (~1e-1 periods) that separates
+/// two genuinely different schedules, so it never snaps a real off-schedule date onto a period.
+const PAYMENT_PERIOD_TOLERANCE: f64 = 1e-9;
+
 fn get_num_remaining_payments(t: f64, maturity: f64, delta: f64) -> (usize, bool) {
     let raw_payments = (maturity - t) / delta;
-    //if exactly integer, then "next payment" happened already
-    if raw_payments == raw_payments.trunc() {
-        (raw_payments as usize, true)
+    //Never test an f64 quotient for exact integrality: `raw == raw.trunc()` only fires when the
+    //schedule happens to be binary-representable, so on real schedules `is_exact` flipped and the
+    //swap got anchored a whole coupon period early/late (see `swap_price_t`).  Compare against the
+    //nearest integer within tolerance instead; below tolerance means the "next payment" is now.
+    let whole_payments = raw_payments.round();
+    let tolerance = PAYMENT_PERIOD_TOLERANCE * raw_payments.abs().max(1.0);
+    if (raw_payments - whole_payments).abs() <= tolerance {
+        (whole_payments as usize, true)
     } else {
         ((raw_payments.floor() + 1.0) as usize, false)
     }
@@ -1230,6 +1243,101 @@ mod tests {
         assert_eq!(is_exact, false);
         let next_exchange_date = maturity - (num_payments as f64 - 1.0) * delta;
         assert_abs_diff_eq!(next_exchange_date, 0.8, epsilon = 0.0000001);
+    }
+
+    /// Whole-number-of-period schedules that are NOT binary-representable.  The f64 quotient drifts to
+    /// either side of the integer, and each direction broke differently under `== trunc()`:
+    ///   low  e.g. (1.1 - 0.1) / 0.1   = 9.999999999999998  -> is_exact flipped false, so the swap
+    ///        got anchored at maturity - (n-1)*delta = 0.2 = t + delta, one period late
+    ///   high e.g. (1.3000000000000003 - 0.1) / 0.1 = 12.000000000000002 -> floor+1 gave n+1,
+    ///        one spurious payment period
+    #[test]
+    fn num_remaining_payments_tolerates_whole_schedules_that_are_not_binary_exact() {
+        let whole_schedules: [(f64, f64, f64, usize); 8] = [
+            (0.1, 1.1, 0.1, 10), //  9.999999999999998
+            (0.1, 2.0, 0.1, 19), // 18.999999999999996
+            (0.3, 2.3, 0.2, 10),
+            (0.25, 2.25, 0.5, 4),
+            (0.1, 0.30000000000000004, 0.1, 2), //  2.0000000000000004
+            (0.1, 0.4, 0.1, 3),                 //  3.0000000000000004
+            (0.1, 0.7000000000000001, 0.1, 6),  //  6.000000000000001
+            (0.1, 1.3000000000000003, 0.1, 12), // 12.000000000000002
+        ];
+        for (t, maturity, delta, expected_payments) in whole_schedules {
+            let raw = (maturity - t) / delta;
+            let (num_payments, is_exact) = get_num_remaining_payments(t, maturity, delta);
+            assert_eq!(
+                num_payments, expected_payments,
+                "({maturity} - {t}) / {delta} = {raw:?} should be {expected_payments} payments"
+            );
+            assert!(
+                is_exact,
+                "({maturity} - {t}) / {delta} = {raw:?} is a whole schedule and must read as exact"
+            );
+            //Whole schedule => the anchor the swap derives must be t itself (payments at t+delta ...).
+            let next_exchange_date = maturity - (num_payments as f64 - 1.0) * delta;
+            assert_abs_diff_eq!(next_exchange_date, t + delta, epsilon = 1e-9);
+        }
+    }
+
+    /// Guard the other way: a mid-life schedule that really is between payment dates must NOT be
+    /// snapped onto a period boundary by the new tolerance.
+    #[test]
+    fn num_remaining_payments_does_not_snap_genuinely_off_schedule_dates() {
+        //      t, maturity, delta, expected payments, expected first remaining payment
+        let mid_life: [(f64, f64, f64, usize, f64); 4] = [
+            (0.5, 2.0, 0.4, 4, 0.8),    //  3.75
+            (0.1, 1.15, 0.1, 11, 0.15), // 10.5
+            (0.0, 1.0, 0.3, 4, 0.1),    //  3.3333333333333335
+            (0.05, 1.0, 0.3, 4, 0.1),   //  3.1666666666666665
+        ];
+        for (t, maturity, delta, expected_payments, expected_first_payment) in mid_life {
+            let raw = (maturity - t) / delta;
+            let (num_payments, is_exact) = get_num_remaining_payments(t, maturity, delta);
+            assert_eq!(
+                num_payments, expected_payments,
+                "({maturity} - {t}) / {delta} = {raw:?} should be {expected_payments} payments"
+            );
+            assert!(
+                !is_exact,
+                "({maturity} - {t}) / {delta} = {raw:?} is off-schedule and must not be exact"
+            );
+            let next_exchange_date = maturity - (num_payments as f64 - 1.0) * delta;
+            assert_abs_diff_eq!(next_exchange_date, expected_first_payment, epsilon = 1e-9);
+        }
+    }
+
+    /// The float comparison was not cosmetic: `swap_price_t` selects `swap_start` from `is_exact`, so a
+    /// whole-but-not-binary schedule priced the swap from the wrong anchor.  With an integral number of
+    /// periods remaining, `swap_price_t` must be the same call as `swap_price_t_init(..., t, n, ...)`.
+    #[test]
+    fn swap_price_t_anchors_at_t_for_whole_non_binary_schedules() {
+        //Needs a curve that moves: on a flat curve a one-period anchor shift is nearly free, which is
+        //why the legacy fixture never showed this.
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+        let r_t = STEEP_CURR_RATE;
+        let swap_rate = 0.045;
+        for (t, swap_maturity, delta, num_payments) in [
+            (0.1, 1.1, 0.1, 10),
+            (0.1, 2.0, 0.1, 19),
+            (0.3, 2.3, 0.2, 10),
+            (0.25, 2.25, 0.5, 4),
+        ] {
+            let derived = hull_white.swap_price_t(r_t, t, swap_maturity, delta, swap_rate);
+            let anchored_at_t =
+                hull_white.swap_price_t_init(r_t, t, t, num_payments, delta, swap_rate);
+            let anchored_one_period_late =
+                hull_white.swap_price_t_init(r_t, t, t + delta, num_payments, delta, swap_rate);
+            assert_abs_diff_eq!(derived, anchored_at_t, epsilon = 1e-12);
+            //Sanity: the wrong anchor really is a materially different number, so the assertion above
+            //has teeth on this fixture (measured gap is ~1e-2 on a ~1e-1 swap price).
+            assert!(
+                (anchored_at_t - anchored_one_period_late).abs() > 1e-4,
+                "fixture too flat to detect an anchor shift at t={t}: {anchored_at_t} vs \
+                 {anchored_one_period_late}"
+            );
+        }
     }
     #[test]
     fn test_get_time_from_t_index() {
