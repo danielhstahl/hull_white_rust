@@ -89,6 +89,8 @@ pub mod error;
 use error::HullWhiteError;
 mod rootfinder;
 pub use rootfinder::{Solution, SolverError, SolverSettings};
+#[cfg(test)]
+mod solver_ab;
 mod validation;
 
 //tdiff=T-t

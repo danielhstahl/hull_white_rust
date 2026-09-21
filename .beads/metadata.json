@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "hull_white_rust",
-  "project_id": "fefaf913-60d5-49f3-8a55-2f6f78f53c17"
-}

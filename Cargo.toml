@@ -16,6 +16,8 @@ binomial_tree = "0.5.0"
 [dev-dependencies]
 approx = "0.2.0"
 rand = "0.5"
+# A/B harness (`src/solver_ab.rs`) still needs the solver this crate replaced.
+nrfind = "1.0.3"
 
 [profile.bench]
 lto = true
