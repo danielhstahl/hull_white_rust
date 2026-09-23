@@ -29,14 +29,46 @@ pub const DEFAULT_TOLERANCE: f64 = 1e-12;
 /// `1e15 * tolerance` wide; Newton typically finishes in well under ten.
 pub const DEFAULT_MAX_ITERATIONS: u32 = 100;
 
-/// How much of the bracket a Newton step has to cover to be worth taking.
+/// How much of the bracket a Newton step has to cover to be worth taking *on distance alone*.
 ///
 /// Without this, a safeguarded Newton can be *bracketed and still useless*: for an objective that
 /// looks like `exp(-B r)` far from the root, the Newton step is `1/B` no matter how far away the
 /// root is, so on a bracket hundreds of rate-units wide it crawls.  Requiring each step to cross a
 /// tenth of the bracket means bisection does the long-distance work and Newton only finishes what
 /// it is actually good at — the region where it converges quadratically.
+///
+/// This is a necessary rule but not a sufficient one on its own: the same test also rejects the step
+/// that has *already landed on the root*, because there the correction is tiny.  See
+/// [`MAX_MODEL_ERROR_RATIO`] for the other half of the acceptance test.
 const MIN_NEWTON_FRACTION: f64 = 0.1;
+
+/// How badly the tangent line is allowed to be wrong over a Newton step for the step to be trusted:
+/// the step is accepted when `|f(x_newton)| <= MAX_MODEL_ERROR_RATIO * |f(x)|`.
+///
+/// Newton's step is built from the tangent, which predicts `f = 0` at `x_newton`; the *actual*
+/// `|f(x_newton)|` is therefore the tangent's error, expressed in the same units as the residual
+/// being corrected.  Requiring that error to be a quarter of the residual says "the linear model of
+/// the objective is good to 25% over the distance this step covers", which is exactly the property
+/// that separates the two cases the width rule cannot tell apart:
+///
+/// * **near the root** the step error is quadratic in the distance left, so the residual drops by
+///   orders of magnitude in one step — far inside 25%.  Accepted, and the solve is over in a few
+///   passes instead of bisecting an answer it already had.
+/// * **deep in a tail** the objective is locally exponential, and an exponential contracts by
+///   `exp(-B * step) = exp(-1) = 0.368` per Newton step *no matter how far away the root is*.  That
+///   is outside 25%, so the crawl is rejected and bisection keeps halving the distance.
+///
+/// The number is a trust threshold, not an accuracy promise — accuracy is still demanded in rate
+/// space, by [`SolverSettings::tolerance`].  A step that fails this test is not discarded, it just
+/// falls back to bisection, which cannot be talked into a crawl.
+///
+/// `0.25` is a measured value, not a guess: the scan in the `solver_ab` harness module docs shows
+/// every threshold above `1/e = 0.368` reopens the tail crawl, while the root agrees with a
+/// far-tighter reference across the whole range.  Going well below the `0.33` knee only costs
+/// evaluations (`0.10` costs ~19% more on the production grid), so `0.25` buys distance from the
+/// contraction rate almost for free.  The extra `f` evaluation this test needs is paid only when
+/// the width rule has already failed, so a step accepted on distance never pays for it.
+const MAX_MODEL_ERROR_RATIO: f64 = 0.25;
 
 /// How far the geometric search will widen around the seed looking for a sign change.  Starting
 /// from `1e-4 * max(1, |seed|)` and doubling, this reaches ~1e116 before giving up.
@@ -295,27 +327,65 @@ pub fn solve(
             f_b = f_x;
         }
         let (low, high) = (a.min(b), a.max(b));
-        if (high - low) <= settings.tolerance * x.abs().max(1.0) {
+        let scale = x.abs().max(1.0);
+        if (high - low) <= settings.tolerance * scale {
             return Ok(Solution {
                 root: x,
                 iterations: iteration,
                 residual: f_x.abs(),
             });
         }
-        //Newton step, accepted only if it lands strictly inside the bracket *and* actually crosses
-        //a meaningful slice of it; otherwise bisect.  The first condition stops a bad derivative or
-        //a bad seed from throwing the iterate into another basin; the second stops a far-tail
-        //Newton from crawling a fixed small step across a huge bracket.
         let slope = df(x);
         let width = high - low;
-        let newton = if slope.is_finite() && slope != 0.0 {
-            x - f_x / slope
+        //Newton's own estimate of how far the root still is.  Everything below is written in terms of
+        //this rather than the raw step so that the two acceptance tests stay in comparable units.
+        let correction = if slope.is_finite() && slope != 0.0 {
+            f_x / slope
         } else {
             f64::NAN
         };
-        let makes_progress =
-            newton.is_finite() && (newton - x).abs() >= MIN_NEWTON_FRACTION * width;
-        x = if newton.is_finite() && newton > low && newton < high && makes_progress {
+        //Exit: converged on the correction.  With an honest derivative `correction` *is* the distance
+        //left, so a sub-tolerance correction is a converged root, not a stalled iteration.  Reading
+        //a tiny correction as "no progress" is what made the shipped loop bisect an answer it had
+        //already computed.  Note this is a rate-space exit -- it says the *unknown* is pinned down,
+        //not that the price residual is small; see the note on `solve_v3` in the A/B harness for why
+        //a price-space exit here would be unsafe.
+        if correction.is_finite() && correction.abs() <= settings.tolerance * scale {
+            let root = x - correction;
+            //Never hand back a point outside the bracket that was actually verified to straddle.
+            if root >= low && root <= high {
+                return Ok(Solution {
+                    root,
+                    iterations: iteration,
+                    residual: f_x.abs(),
+                });
+            }
+        }
+        let newton = if correction.is_finite() {
+            x - correction
+        } else {
+            f64::NAN
+        };
+        //Step acceptance.  The step must stay inside the bracket -- that is the safeguard, and it is
+        //not negotiable: it stops a lying derivative or a bad seed from throwing the iterate into
+        //another basin.  Given that, either of two things makes the Newton step the right one:
+        //
+        //  * `makes_progress` -- it crosses a tenth of the bracket, so it is doing real long-range
+        //    work by distance (the original guard); or
+        //  * `improves` -- it lands where the tangent line predicted the objective to within a
+        //    quarter of the residual being corrected, which is the signature of being inside the
+        //    quadratic region even though the step is far too small to cross the bracket.
+        //
+        //Neither holds -> bisect, which is slow but cannot be argued into a crawl.
+        let inside = newton.is_finite() && newton > low && newton < high;
+        let makes_progress = inside && correction.abs() >= MIN_NEWTON_FRACTION * width;
+        let improves = if inside && !makes_progress {
+            let f_newton = f(newton);
+            f_newton.is_finite() && f_newton.abs() <= MAX_MODEL_ERROR_RATIO * f_x.abs()
+        } else {
+            false
+        };
+        x = if makes_progress || improves {
             newton
         } else {
             0.5 * (low + high)

@@ -74,6 +74,15 @@
 //! and the message carries the option maturity, the strike and the seed alongside the bracket,
 //! its width and the residual at the point the solver gave up.
 //!
+//! Every exit from that solve is in **rate** space: the bracket width, and the Newton correction
+//! once it is below tolerance, are read as distance-to-root in rate units.  A price residual is
+//! never an exit — `f` is a price and can be steep enough that a `1e-8` price residual hides a
+//! `7e-3` error in the critical rate, which would put every leg strike of the decomposition
+//! wrong while the objective reported "zero".  Because the exit is a statement about how hard the
+//! search keeps hunting rather than about how far off the answer is, a loosened tolerance costs
+//! iterations rather than capping accuracy: at `1e-7` the price lands on the same value as at
+//! `1e-14`.
+//!
 //! ## Mathematical Foundation
 //!
 //! The Hull-White model assumes that the short rate follows the stochastic differential equation:
@@ -3903,43 +3912,80 @@ mod tests {
         );
     }
 
+    /// Worst price error over a few strikes, against a 1e-15-tolerance reference, for one solve
+    /// tolerance.
+    fn worst_price_err(
+        tolerance: f64,
+        yield_curve: &(impl Fn(f64) -> f64 + Sync),
+        forward_curve: &(impl Fn(f64) -> f64 + Sync),
+        times: &[f64],
+    ) -> f64 {
+        let reference_model = HullWhite::init(STEEP_A, STEEP_SIG, yield_curve, forward_curve)
+            .unwrap()
+            .with_solver(SolverSettings {
+                tolerance: 1e-15,
+                max_iterations: 500,
+                initial_guess: None,
+            })
+            .unwrap();
+        let model = HullWhite::init(STEEP_A, STEEP_SIG, yield_curve, forward_curve)
+            .unwrap()
+            .with_solver(SolverSettings {
+                tolerance,
+                ..SolverSettings::default()
+            })
+            .unwrap();
+        [0.8f64, 0.95, 1.0, 1.05]
+            .into_iter()
+            .map(|strike| {
+                let reference = direct_payoff_price(
+                    &reference_model,
+                    0.04,
+                    1.0,
+                    2.0,
+                    times,
+                    0.05,
+                    strike,
+                    true,
+                );
+                let price = model
+                    .coupon_bond_call_t(0.04, 1.0, 2.0, times, 0.05, strike)
+                    .unwrap();
+                (price - reference).abs()
+            })
+            .fold(0.0f64, f64::max)
+    }
+
     #[test]
     fn a_looser_root_tolerance_is_visible_in_the_price() {
         //The reason the tolerance is configurable at all: the old hard-coded 1e-7 capped how
         //accurate a price anyone could get, and now that cap is measurable instead of invisible.
         let times = [2.5, 3.0, 3.5, 4.0];
         let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-        let loose = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
-            .unwrap()
-            .with_solver(SolverSettings {
-                tolerance: 1e-7,
-                ..SolverSettings::default()
-            })
-            .unwrap();
-        let tight = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
-            .unwrap()
-            .with_solver(SolverSettings {
-                tolerance: 1e-14,
-                ..SolverSettings::default()
-            })
-            .unwrap();
-        let mut max_loose = 0.0f64;
-        let mut max_tight = 0.0f64;
-        for strike in [0.8f64, 0.95, 1.0, 1.05] {
-            let reference = direct_payoff_price(&loose, 0.04, 1.0, 2.0, &times, 0.05, strike, true);
-            let loose_price = loose
-                .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, strike)
-                .unwrap();
-            let tight_price = tight
-                .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, strike)
-                .unwrap();
-            max_loose = max_loose.max((loose_price - reference).abs());
-            max_tight = max_tight.max((tight_price - reference).abs());
-        }
+        let loose = worst_price_err(1e-4, &yield_curve, &forward_curve, &times);
+        let tight = worst_price_err(1e-14, &yield_curve, &forward_curve, &times);
+        println!("tolerance 1e-4 worst price err {loose:e}; 1e-14 worst price err {tight:e}");
+        assert!(tight < loose, "tight {tight:e} should beat loose {loose:e}");
+        assert!(tight < 1e-11, "tight tolerance left {tight:e}");
+    }
+
+    #[test]
+    fn the_root_tolerance_bounds_the_search_not_the_achieved_error() {
+        //The tolerance is a statement about how hard the solver keeps hunting (bracket width in rate
+        //units), not about how far off the answer it returns.  When the solve exits on the Newton
+        //correction the returned root is Newton's *prediction* of the root, which is good to far
+        //better than the correction's size, so the old 1e-7 cap is no longer a cap on accuracy:
+        //1e-7 now lands on the same price as 1e-14 (both sit on the model's round-off floor).
+        let times = [2.5, 3.0, 3.5, 4.0];
+        let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+        let legacy_cap = worst_price_err(1e-7, &yield_curve, &forward_curve, &times);
+        let tight = worst_price_err(1e-14, &yield_curve, &forward_curve, &times);
+        println!("tolerance 1e-7 worst price err {legacy_cap:e}; 1e-14 worst price err {tight:e}");
+        //A 1e-7 rate error on this instrument is worth ~1e-9 of price; the achieved error is three
+        //orders below that, so the legacy tolerance no longer costs accuracy -- only iterations.
         assert!(
-            max_tight < max_loose,
-            "tight {max_tight:e} should beat loose {max_loose:e}"
+            legacy_cap < 1e-11 && legacy_cap <= tight * 1.5 + 1e-15,
+            "tolerance 1e-7 left {legacy_cap:e}, tight 1e-14 left {tight:e}"
         );
-        assert!(max_tight < 1e-11, "tight tolerance left {max_tight:e}");
     }
 }
