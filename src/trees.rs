@@ -131,7 +131,59 @@ where
             num_steps,
         ))
     }
-    /// Returns price of an American payer swaption at some future time t
+    /// Returns price of an American payer swaption at current time
+    ///
+    /// Exactly [`HullWhite::american_payer_swaption_t`] at `t = 0` with `r_t = r(0)`
+    /// ([`HullWhite::short_rate_now`]), so the tree starts on the model's initial short rate.
+    ///
+    /// # Comments
+    ///
+    /// Tree-based like [`HullWhite::american_payer_swaption_t`]: slower than the analytic pricers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let a = 0.2; //speed of mean reversion for underlying Hull White process
+    /// let sigma = 0.3; //volatility of underlying Hull White process
+    /// let option_maturity = 2.0;
+    /// let num_swap_payments = 16;
+    /// let delta = 0.25; //delta is the tenor of the Libor rate
+    /// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
+    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
+    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// let num_tree_steps = 100;
+    /// let swaption = hull_white.american_payer_swaption_now(
+    ///     option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
+    /// ).unwrap();
+    /// let r0 = hull_white.short_rate_now().unwrap();
+    /// let via_t = hull_white.american_payer_swaption_t(
+    ///     r0, 0.0, option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
+    /// ).unwrap();
+    /// assert!((swaption - via_t).abs() < 1e-12, "{swaption} vs {via_t}");
+    /// assert!(swaption > 0.0, "american payer swaption {swaption}");
+    /// ```
+    pub fn american_payer_swaption_now(
+        &self,
+        option_maturity: f64,
+        num_swap_payments: usize,
+        delta: f64,
+        swap_rate: f64,
+        num_steps: usize,
+    ) -> Result<f64, HullWhiteError> {
+        let t = 0.0; //since "now"
+        let r_t = self.short_rate_now()?;
+        self.american_payer_swaption_t(
+            r_t,
+            t,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            num_steps,
+        )
+    }
+    /// Returns price of an American receiver swaption at some future time t
     ///
     /// # Comments
     ///
@@ -148,7 +200,7 @@ where
     /// let option_maturity = 2.0;
     /// let num_swap_payments = 16;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
-    /// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
+    /// let swap_rate = 0.04; //the swap rate is what the receiver receives if option is exercised
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
     /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
@@ -184,6 +236,59 @@ where
             false,
             num_steps,
         ))
+    }
+    /// Returns price of an American receiver swaption at current time
+    ///
+    /// Exactly [`HullWhite::american_receiver_swaption_t`] at `t = 0` with `r_t = r(0)`
+    /// ([`HullWhite::short_rate_now`]), so the tree starts on the model's initial short rate.
+    ///
+    /// # Comments
+    ///
+    /// Tree-based like [`HullWhite::american_receiver_swaption_t`]: slower than the analytic
+    /// pricers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let a = 0.2; //speed of mean reversion for underlying Hull White process
+    /// let sigma = 0.3; //volatility of underlying Hull White process
+    /// let option_maturity = 2.0;
+    /// let num_swap_payments = 16;
+    /// let delta = 0.25; //delta is the tenor of the Libor rate
+    /// let swap_rate = 0.04; //the swap rate is what the receiver receives if option is exercised
+    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
+    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
+    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// let num_tree_steps = 100;
+    /// let swaption = hull_white.american_receiver_swaption_now(
+    ///     option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
+    /// ).unwrap();
+    /// let r0 = hull_white.short_rate_now().unwrap();
+    /// let via_t = hull_white.american_receiver_swaption_t(
+    ///     r0, 0.0, option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
+    /// ).unwrap();
+    /// assert!((swaption - via_t).abs() < 1e-12, "{swaption} vs {via_t}");
+    /// assert!(swaption > 0.0, "american receiver swaption {swaption}");
+    /// ```
+    pub fn american_receiver_swaption_now(
+        &self,
+        option_maturity: f64,
+        num_swap_payments: usize,
+        delta: f64,
+        swap_rate: f64,
+        num_steps: usize,
+    ) -> Result<f64, HullWhiteError> {
+        let t = 0.0; //since "now"
+        let r_t = self.short_rate_now()?;
+        self.american_receiver_swaption_t(
+            r_t,
+            t,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            num_steps,
+        )
     }
     #[cfg(test)]
     fn european_swaption_tree(

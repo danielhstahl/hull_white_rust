@@ -114,6 +114,24 @@ pub fn payment_schedule(coupon_times: &[f64], t: f64) -> Result<(), HullWhiteErr
     Ok(())
 }
 
+/// A live cap/floor schedule: a non-empty set of `(option_maturity, strike)` periods.
+///
+/// Each period is priced on its own (by [`caplet_now`](crate::HullWhite::caplet_now) or
+/// [`floorlet_now`](crate::HullWhite::floorlet_now)) and the results summed, so unlike a bond's
+/// coupon schedule this one carries no ordering requirement: duplicated or unsorted maturities are
+/// just more caplets, and every per-period rule (`option_maturity > t`, `1 + delta * strike > 0`)
+/// is enforced by the caplet pricer itself, which names the offending argument in the error.
+/// What cannot be a price is the empty case: summing nothing returns `0.0`, which reads as a free
+/// cap.
+pub fn caplet_schedule(periods: &[(f64, f64)]) -> Result<(), HullWhiteError> {
+    if periods.is_empty() {
+        return Err(invalid(
+            "periods is empty; a cap or floor with no periods has no price here".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// There is no instrument with zero periods.
 pub fn at_least_one(name: &str, count: usize) -> Result<(), HullWhiteError> {
     if count >= 1 {

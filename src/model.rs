@@ -195,6 +195,62 @@ where
             self.sigma.powi(2) * (1.0 - (-2.0 * self.a * (t_m - t)).exp()) / (2.0 * self.a),
         )
     }
+    /// The model's short rate right now, `r(0)`.
+    ///
+    /// Every `*_now` pricing function that needs a state variable takes it from here rather than
+    /// from an argument: at the valuation date `t = 0` there is nothing to condition on except the
+    /// initial curve the model was calibrated to, so `r(0)` is not an input, it is a fact about
+    /// the calibration.  Concretely `r(0) = phi(0)`, and the volatility term of `phi`
+    /// (`sigma^2 (1 - e^{-a t})^2 / (2 a^2)`) vanishes at `t = 0`, so
+    ///
+    /// ```text
+    /// r(0) = phi(0) = forward_curve(0.0)
+    /// ```
+    ///
+    /// i.e. the *instantaneous* forward rate at the front of the curve.  Note which curve that is:
+    /// `forward_curve` is the instantaneous forward `f(0, t)`, while `yield_curve` is cumulative
+    /// (`yield_curve(T)` is the integral of `f(0, .)` over `[0, T]`, which is why
+    /// `bond_price_now` is `exp(-yield_curve(T))`).  So `r(0)` comes off the forward curve, *not*
+    /// off `yield_curve(0.0)`, which is `0` for any curve that is an integral.
+    ///
+    /// This is the value to hand a `*_t` function as `r_t` alongside `t = 0.0` when the state has
+    /// to be passed explicitly; every `*_now` variant in this crate is exactly that call, and the
+    /// two routes agree to machine precision because the same `r(0)` is what makes
+    /// `bond_price_t(r(0), 0, T) == bond_price_now(T)`.
+    ///
+    /// A curve that is not finite at `0` — `|t| t.ln()`, say, which is `-inf` there — cannot give a
+    /// short rate and is an error rather than a `-inf` price.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hull_white::HullWhite;
+    ///
+    /// // Cumulative yield: 0.05*T + 0.01*T^2 is the integral of 0.05 + 0.02*t.
+    /// let yield_curve = |t: f64| 0.05 * t + 0.01 * t * t;
+    /// // Instantaneous forward curve; finite at 0, as `r(0)` requires.
+    /// let forward_curve = |t: f64| 0.05 + 0.02 * t;
+    /// let hull_white = HullWhite::init(0.15, 0.02, &yield_curve, &forward_curve).unwrap();
+    ///
+    /// let r0 = hull_white.short_rate_now().unwrap();
+    /// assert!((r0 - 0.05).abs() < 1e-12, "r(0) = {r0}");
+    /// assert!((r0 - forward_curve(0.0)).abs() < 1e-12, "r(0) is the forward curve at 0");
+    ///
+    /// // Feeding that rate back into the `t` form at `t = 0` reproduces the `now` bond price.
+    /// for maturity in [1.0, 3.0, 7.5] {
+    ///     let via_t = hull_white.bond_price_t(r0, 0.0, maturity).unwrap();
+    ///     let via_now = hull_white.bond_price_now(maturity).unwrap();
+    ///     assert!((via_t - via_now).abs() < 1e-12, "maturity {maturity}: {via_t} vs {via_now}");
+    /// }
+    /// ```
+    pub fn short_rate_now(&self) -> Result<f64, HullWhiteError> {
+        validation::finish("short_rate_now", self.short_rate_now_raw())
+    }
+    /// Unvalidated [`HullWhite::short_rate_now`], for internals that have already checked the
+    /// curve or do not need to propagate its failure.
+    pub(crate) fn short_rate_now_raw(&self) -> f64 {
+        self.phi_t(0.0)
+    }
 }
 
 #[cfg(test)]

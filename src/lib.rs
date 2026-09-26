@@ -91,6 +91,42 @@
 //! iterations rather than capping accuracy: at `1e-7` the price lands on the same value as at
 //! `1e-14`.
 //!
+//! ## Pricing at `now`: the `_now` variants and `r(0)`
+//!
+//! Every pricing function comes in two shapes.  The `_t` shape takes the state explicitly — `r_t`,
+//! the short rate observed at the valuation time `t` — and prices the instrument from there.  The
+//! `_now` shape prices the same instrument at `t = 0`, where the state is not an input but a
+//! consequence of the calibration, so it drops the `r_t` argument entirely.  The rate that stands
+//! in for it is [`HullWhite::short_rate_now`], and each `now` variant of a state-dependent
+//! instrument is exactly:
+//!
+//! ```rust
+//! # use hull_white::HullWhite;
+//! # let yield_curve = |t: f64| 0.05 * t + 0.01 * t * t;
+//! # let forward_curve = |t: f64| 0.05 + 0.02 * t;
+//! # let hull_white = HullWhite::init(0.2, 0.03, &yield_curve, &forward_curve).unwrap();
+//! # let periods = [(1.0, 0.04), (1.25, 0.045), (1.5, 0.05)];
+//! let r0 = hull_white.short_rate_now().unwrap();
+//! let now = hull_white.cap_now(&periods, 0.25).unwrap();
+//! let via_t = hull_white.cap_t(r0, 0.0, &periods, 0.25).unwrap();
+//! assert!((now - via_t).abs() < 1e-12, "{now} vs {via_t}");
+//! ```
+//!
+//! `r(0)` is the **instantaneous** forward at the front of the curve, `forward_curve(0.0)` — which
+//! is the same thing as `phi(0)`, because the volatility term of `phi`,
+//! `sigma^2 (1 - e^{-a t})^2 / (2 a^2)`, vanishes at `t = 0`.  It is *not* `yield_curve(0.0)`:
+//! `yield_curve` is cumulative (`bond_price_now(T) = exp(-yield_curve(T))` is its integral), so
+//! `yield_curve(0.0)` is `0` for any curve worth the name.  A fixture curve like `|t| t.ln()`,
+//! which appears in the older examples in this crate, is `-inf` at `0` and cannot price anything on
+//! the `now` side; pair `|t| 0.05 + 0.02 * t` as the forward curve with `|t| 0.05*t + 0.01*t*t`
+//! as the yield curve instead.
+//!
+//! The zero-coupon `_now` prices never look at a rate at all — `bond_price_now` is a closed form off
+//! the yield curve — but a Jamshidian-priced option does, and not by accident: the decomposition
+//! needs the rate at which the deliverable equals the strike, and the distribution of that rate is
+//! anchored at `r(0)`.  Getting it from the curve rather than from a guess is what makes
+//! `coupon_bond_call_now(r0-dependent args)` agree with `bond_call_now`'s discounting.
+//!
 //! ## Mathematical Foundation
 //!
 //! The Hull-White model assumes that the short rate follows the stochastic differential equation:
@@ -107,13 +143,13 @@
 //!
 //! | Module | What lives there |
 //! |---|---|
-//! | `model` | the [`HullWhite`] struct, calibration entry, `phi_t` / `mu_r` / `variance_r` / `t_forward_bond_vol` |
+//! | `model` | the [`HullWhite`] struct, calibration entry, `phi_t` / `mu_r` / `variance_r` / [`short_rate_now`](HullWhite::short_rate_now) / `t_forward_bond_vol` |
 //! | `curves` | `a_t` (bond duration), `ct_t` (bond price constant), the Eurodollar variance integral |
 //! | `schedules` | coupon/payment schedules and the remaining-payment count |
 //! | `bonds` | zero coupon and coupon bond prices, and the coupon-sum kernels they share |
 //! | `jamshidian` | the critical-rate bracket and solve, and the decomposition that consumes them |
 //! | `options` | bond options and coupon-bond option entry points |
-//! | `rates` | caplets, Eurodollar futures, forward and spot Libor |
+//! | `rates` | caplets, whole caps and floors over a period schedule, Eurodollar futures, forward and spot Libor |
 //! | `swaps` | forward swap rate, swap price, European swaptions |
 //! | `trees` | the short-rate tree: European tree check and American swaptions |
 //! | [`error`] | [`error::HullWhiteError`] |

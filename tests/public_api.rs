@@ -8,7 +8,7 @@
 //! toolchain — which `benches/bench.rs`, the other end-to-end compile check, is not (it needs
 //! `#![feature(test)]`).
 //!
-//! Two things are pinned here:
+//! Three things are pinned here:
 //!
 //! 1. Every public item that existed before the split still resolves from the crate root:
 //!    `hull_white::HullWhite`, `hull_white::get_coupon_times`, the root-finding types
@@ -17,6 +17,11 @@
 //!    Argument *order* is part of the API, and a swap of two `f64`s compiles happily while
 //!    pricing the wrong thing — so each call below uses distinct values per argument and checks
 //!    the result against the economics it is supposed to describe.
+//! 3. The `now` side behaves as documented: `HullWhite::short_rate_now` is the curve-derived `r(0)`,
+//!    every `*_now` variant is its `*_t` twin at `(short_rate_now(), 0.0)`, and `cap` / `floor`
+//!    aggregate a whole `(option_maturity, strike)` schedule into the sum of their caplets /
+//!    floorlets.  See `every_now_variant_is_its_t_variant_at_zero` and
+//!    `cap_and_floor_aggregate_periods`.
 //!
 //! These are shape checks, not pricing checks: the numerics are covered by the per-module tests
 //! under `src/`.
@@ -33,14 +38,31 @@ fn forward_curve(t: f64) -> f64 {
     t.ln()
 }
 
+/// A curve pair whose *front* is finite.  The `now` side of the crate needs this: `r(0)` is
+/// `forward_curve(0.0)`, and the `t.ln()` shape used above is `-inf` there.  It is also the shape
+/// a real curve has — the instantaneous forward at the front of the curve is a number.
+fn finite_yield_curve(t: f64) -> f64 {
+    0.05 * t + 0.01 * t * t //the integral of 0.05 + 0.02 * t
+}
+fn finite_forward_curve(t: f64) -> f64 {
+    0.05 + 0.02 * t
+}
+
 /// `HullWhite<'a, T, U>` *borrows* its curves, so a consumer that wants a `'static` model has to
 /// hand it something with `'static` type.  `fn` items are distinct from `fn` pointers, hence the
 /// statics rather than a pair of locals.
 static YIELD_CURVE: fn(f64) -> f64 = yield_curve;
 static FORWARD_CURVE: fn(f64) -> f64 = forward_curve;
+static FINITE_YIELD_CURVE: fn(f64) -> f64 = finite_yield_curve;
+static FINITE_FORWARD_CURVE: fn(f64) -> f64 = finite_forward_curve;
 
 fn model() -> Model {
     HullWhite::init(0.1, 0.01, &YIELD_CURVE, &FORWARD_CURVE).unwrap()
+}
+
+/// The model to price the `now` side with: same shape, curves that are finite at `0`.
+fn finite_model() -> Model {
+    HullWhite::init(0.1, 0.01, &FINITE_YIELD_CURVE, &FINITE_FORWARD_CURVE).unwrap()
 }
 
 /// A schedule far enough away that nothing has been paid yet at `t = 1.0`.
@@ -317,4 +339,226 @@ fn invalid_instruments_are_errors_not_panics() {
     assert!(matches!(bad, HullWhiteError::InvalidInput(_)), "{bad:?}");
     let bad = hw.coupon_bond_price_now(&[], 0.05).unwrap_err();
     assert!(matches!(bad, HullWhiteError::InvalidInput(_)), "{bad:?}");
+}
+
+// ---- the `now` side ---------------------------------------------------------------
+
+/// `r(0)` is public, and it is derived rather than supplied: the `now` side of the crate takes no
+/// rate argument because the calibration already fixes what the short rate is today.
+#[test]
+fn short_rate_now_is_public_and_curve_derived() {
+    let hw = finite_model();
+    let r0 = hw.short_rate_now().unwrap();
+    assert!(r0.is_finite(), "r(0) = {r0}");
+    //The instantaneous forward at the front of the curve, not the cumulative yield there.
+    assert!((r0 - finite_forward_curve(0.0)).abs() < 1e-12, "{r0}");
+    assert!((r0 - 0.05).abs() < 1e-12, "{r0}");
+    assert!(
+        (r0 - finite_yield_curve(0.0)).abs() > 1e-3,
+        "r(0) must not be read off the cumulative yield"
+    );
+}
+
+/// The contract every `now`/`t` pair keeps, checked from outside the crate: the `now` variant is the
+/// `t` variant at `(short_rate_now(), 0.0)`.  This pins shape *and* semantics — a pair wired to
+/// the wrong argument still compiles, so each call below carries distinct values and compares the
+/// two routes.
+#[test]
+fn every_now_variant_is_its_t_variant_at_zero() {
+    let hw = finite_model();
+    let r0 = hw.short_rate_now().unwrap();
+    let close = |a: f64, b: f64, what: &str| {
+        assert!(
+            (a - b).abs() <= 1e-12 * a.abs().max(1.0),
+            "{what}: now {a} vs t {b}"
+        );
+    };
+
+    //Bonds.
+    close(
+        hw.bond_price_now(3.0).unwrap(),
+        hw.bond_price_t(r0, 0.0, 3.0).unwrap(),
+        "bond_price",
+    );
+    let coupon_times = get_coupon_times(4, 1.75, 0.25).unwrap();
+    close(
+        hw.coupon_bond_price_now(&coupon_times, 0.05).unwrap(),
+        hw.coupon_bond_price_t(r0, 0.0, &coupon_times, 0.05)
+            .unwrap(),
+        "coupon_bond_price",
+    );
+    //Zero coupon bond options.
+    close(
+        hw.bond_call_now(1.5, 3.0, 0.9).unwrap(),
+        hw.bond_call_t(r0, 0.0, 1.5, 3.0, 0.9).unwrap(),
+        "bond_call",
+    );
+    close(
+        hw.bond_put_now(1.5, 3.0, 0.9).unwrap(),
+        hw.bond_put_t(r0, 0.0, 1.5, 3.0, 0.9).unwrap(),
+        "bond_put",
+    );
+    //Coupon bond options (the Jamshidian side).
+    close(
+        hw.coupon_bond_call_now(1.5, &coupon_times, 0.05, 1.0)
+            .unwrap(),
+        hw.coupon_bond_call_t(r0, 0.0, 1.5, &coupon_times, 0.05, 1.0)
+            .unwrap(),
+        "coupon_bond_call",
+    );
+    close(
+        hw.coupon_bond_put_now(1.5, &coupon_times, 0.05, 1.0)
+            .unwrap(),
+        hw.coupon_bond_put_t(r0, 0.0, 1.5, &coupon_times, 0.05, 1.0)
+            .unwrap(),
+        "coupon_bond_put",
+    );
+    //Caplets, floorlets and their aggregates.
+    let delta = 0.25;
+    let periods = [(1.0, 0.04), (1.25, 0.045), (1.5, 0.05)];
+    close(
+        hw.caplet_now(1.0, delta, 0.04).unwrap(),
+        hw.caplet_t(r0, 0.0, 1.0, delta, 0.04).unwrap(),
+        "caplet",
+    );
+    close(
+        hw.floorlet_now(1.0, delta, 0.04).unwrap(),
+        hw.floorlet_t(r0, 0.0, 1.0, delta, 0.04).unwrap(),
+        "floorlet",
+    );
+    close(
+        hw.cap_now(&periods, delta).unwrap(),
+        hw.cap_t(r0, 0.0, &periods, delta).unwrap(),
+        "cap",
+    );
+    close(
+        hw.floor_now(&periods, delta).unwrap(),
+        hw.floor_t(r0, 0.0, &periods, delta).unwrap(),
+        "floor",
+    );
+    //Simple rates.
+    close(
+        hw.euro_dollar_future_now(1.0, delta).unwrap(),
+        hw.euro_dollar_future_t(r0, 0.0, 1.0, delta).unwrap(),
+        "euro_dollar_future",
+    );
+    close(
+        hw.libor_rate_now(delta).unwrap(),
+        hw.libor_rate_t(r0, 0.0, delta).unwrap(),
+        "libor_rate",
+    );
+    //Swaps.
+    close(
+        hw.forward_swap_rate_now(1.0, 4, delta).unwrap(),
+        hw.forward_swap_rate_t(r0, 0.0, 1.0, 4, delta).unwrap(),
+        "forward_swap_rate",
+    );
+    close(
+        hw.swap_rate_now(4, delta).unwrap(),
+        hw.swap_rate_t(r0, 0.0, 4, delta).unwrap(),
+        "swap_rate",
+    );
+    close(
+        hw.swap_price_now(1.0, delta, 0.045).unwrap(),
+        hw.swap_price_t(r0, 0.0, 1.0, delta, 0.045).unwrap(),
+        "swap_price",
+    );
+    close(
+        hw.swap_price_now_init(4, delta, 0.045).unwrap(),
+        hw.swap_price_t_init(r0, 0.0, 0.0, 4, delta, 0.045).unwrap(),
+        "swap_price_init",
+    );
+    //European swaptions.
+    close(
+        hw.european_payer_swaption_now(1.0, 4, delta, 0.045)
+            .unwrap(),
+        hw.european_payer_swaption_t(r0, 0.0, 1.0, 4, delta, 0.045)
+            .unwrap(),
+        "european_payer_swaption",
+    );
+    close(
+        hw.european_receiver_swaption_now(1.0, 4, delta, 0.045)
+            .unwrap(),
+        hw.european_receiver_swaption_t(r0, 0.0, 1.0, 4, delta, 0.045)
+            .unwrap(),
+        "european_receiver_swaption",
+    );
+    //American swaptions, tree priced at the initial short rate.
+    close(
+        hw.american_payer_swaption_now(1.0, 4, delta, 0.045, 40)
+            .unwrap(),
+        hw.american_payer_swaption_t(r0, 0.0, 1.0, 4, delta, 0.045, 40)
+            .unwrap(),
+        "american_payer_swaption",
+    );
+    close(
+        hw.american_receiver_swaption_now(1.0, 4, delta, 0.045, 40)
+            .unwrap(),
+        hw.american_receiver_swaption_t(r0, 0.0, 1.0, 4, delta, 0.045, 40)
+            .unwrap(),
+        "american_receiver_swaption",
+    );
+}
+
+/// A cap or floor is one call for a whole schedule, and the schedule-level identities hold from
+/// outside the crate: the aggregate equals the sum of its caplets (floorlets), and the cap/floor
+/// gap is the forward legs.
+#[test]
+fn cap_and_floor_aggregate_periods() {
+    let hw = finite_model();
+    let delta = 0.25;
+    let periods: Vec<(f64, f64)> = (1..=20)
+        .map(|index| (index as f64 * delta, 0.04 + 0.001 * (index % 5) as f64))
+        .collect();
+    let cap = hw.cap_now(&periods, delta).unwrap();
+    let floor = hw.floor_now(&periods, delta).unwrap();
+    let caplets: f64 = periods
+        .iter()
+        .map(|&(option_maturity, strike)| hw.caplet_now(option_maturity, delta, strike).unwrap())
+        .sum();
+    let floorlets: f64 = periods
+        .iter()
+        .map(|&(option_maturity, strike)| hw.floorlet_now(option_maturity, delta, strike).unwrap())
+        .sum();
+    assert!(cap > 0.0 && floor > 0.0, "cap {cap}, floor {floor}");
+    assert!(
+        (cap - caplets).abs() <= 1e-12 * caplets.abs(),
+        "cap {cap} vs sum of caplets {caplets}"
+    );
+    assert!(
+        (floor - floorlets).abs() <= 1e-12 * floorlets.abs(),
+        "floor {floor} vs sum of floorlets {floorlets}"
+    );
+    let legs: f64 = periods
+        .iter()
+        .map(|&(option_maturity, strike)| {
+            let near = hw.bond_price_now(option_maturity).unwrap();
+            let far = hw.bond_price_now(option_maturity + delta).unwrap();
+            near - (1.0 + delta * strike) * far
+        })
+        .sum();
+    assert!(
+        (cap - floor - legs).abs() <= 1e-11 * legs.abs().max(1.0),
+        "cap {cap} - floor {floor} vs forward legs {legs}"
+    );
+}
+
+/// A curve with no finite front cannot supply `r(0)`, and says so instead of pricing a nonsense
+/// number.  This is the trap the `|t| t.ln()` fixture in the older examples walks into: that curve
+/// is `-inf` at `0`, so nothing on the state-dependent `now` side can be priced with it.
+#[test]
+fn an_infinite_front_curve_reports_r0_as_an_error() {
+    let hw = model();
+    assert!(matches!(
+        hw.short_rate_now(),
+        Err(HullWhiteError::NumericalError(_))
+    ));
+    assert!(
+        hw.coupon_bond_call_now(1.5, &[1.75, 2.0], 0.05, 1.0)
+            .is_err()
+    );
+    assert!(hw.swap_price_now(1.0, 0.25, 0.045).is_err());
+    //The zero coupon `now` prices never consult a rate, so they still work.
+    assert!(hw.bond_price_now(2.0).unwrap().is_finite());
+    assert!(hw.caplet_now(1.0, 0.25, 0.04).unwrap() > 0.0);
 }
