@@ -13,29 +13,19 @@ fn the_price_does_not_depend_on_where_the_solver_starts() {
     //The old solver started from a hard-coded 3% and its answer moved with that guess.  With
     //a real bracket and a bisection guard, any seed reaches the same root.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let reference = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap()
-    .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
-    .unwrap();
-    for seed in [-1.0f64, 0.0, 0.03, 0.5, 5.0, 50.0, 1e3, 1e6] {
-        let hull_white = HullWhite::init(
-            STEEP_CURVE.a,
-            STEEP_CURVE.sigma,
-            &yield_curve,
-            &forward_curve,
-        )
+    let curve = STEEP_CURVE.curve();
+    let reference = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve)
         .unwrap()
-        .with_solver(SolverSettings {
-            initial_guess: Some(seed),
-            ..SolverSettings::default()
-        })
+        .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
         .unwrap();
+    for seed in [-1.0f64, 0.0, 0.03, 0.5, 5.0, 50.0, 1e3, 1e6] {
+        let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve)
+            .unwrap()
+            .with_solver(SolverSettings {
+                initial_guess: Some(seed),
+                ..SolverSettings::default()
+            })
+            .unwrap();
         let priced = hull_white
             .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
             .unwrap();
@@ -53,8 +43,8 @@ fn the_bracket_actually_brackets() {
     let times = [2.5, 3.0, 3.5, 4.0];
     for s in FIXTURES.iter() {
         let name = s.name;
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let (r_t, t, u) = (0.04, 1.0, 2.0);
         for strike in [0.5f64, 0.8, 0.95, 1.0, 1.05, 1.3, 3.0] {
             let (lower, upper) = hull_white
@@ -95,14 +85,8 @@ fn a_single_coupon_schedule_reduces_to_the_zero_coupon_option() {
     //is the plain zero-coupon bond option, priced here without any root find at all.
     //
     //  (1 + c) * call_discount(P(t,T), K / (1 + c), P(t,U), sigma_leg)
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let (r_t, t, u) = (0.04, 1.0, 2.0);
     for bond_maturity in [2.5f64, 4.0, 10.0] {
         for coupon_rate in [0.05f64, 0.01, -0.02] {
@@ -167,8 +151,8 @@ fn a_forty_eight_coupon_schedule_prices_against_the_integral() {
     assert_eq!(schedule.len(), 48);
     for s in FIXTURES.iter() {
         let name = s.name;
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let (r_t, t, u) = (0.04, 1.0, 2.0);
         let underlying = hull_white
             .coupon_bond_price_t(r_t, t, &schedule, 0.05)
@@ -221,19 +205,14 @@ fn a_starved_solver_says_which_stage_failed() {
     //A failure names the stage that failed instead of handing back a bare number: too few
     //iterations to converge, in the context of the instrument being priced.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let starved = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap()
-    .with_solver(SolverSettings {
-        max_iterations: 1,
-        ..SolverSettings::default()
-    })
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let starved = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve)
+        .unwrap()
+        .with_solver(SolverSettings {
+            max_iterations: 1,
+            ..SolverSettings::default()
+        })
+        .unwrap();
     let error = starved
         .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
         .unwrap_err();
@@ -250,22 +229,16 @@ fn a_starved_solver_says_which_stage_failed() {
 
 /// Worst price error over a few strikes, against a 1e-15-tolerance reference, for one solve
 /// tolerance.
-fn worst_price_err(
-    tolerance: f64,
-    yield_curve: &(impl Fn(f64) -> f64 + Sync),
-    forward_curve: &(impl Fn(f64) -> f64 + Sync),
-    times: &[f64],
-) -> f64 {
-    let reference_model =
-        HullWhite::init(STEEP_CURVE.a, STEEP_CURVE.sigma, yield_curve, forward_curve)
-            .unwrap()
-            .with_solver(SolverSettings {
-                tolerance: 1e-15,
-                max_iterations: 500,
-                initial_guess: None,
-            })
-            .unwrap();
-    let model = HullWhite::init(STEEP_CURVE.a, STEEP_CURVE.sigma, yield_curve, forward_curve)
+fn worst_price_err(tolerance: f64, curve: &dyn crate::curves::YieldCurve, times: &[f64]) -> f64 {
+    let reference_model = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, curve)
+        .unwrap()
+        .with_solver(SolverSettings {
+            tolerance: 1e-15,
+            max_iterations: 500,
+            initial_guess: None,
+        })
+        .unwrap();
+    let model = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, curve)
         .unwrap()
         .with_solver(SolverSettings {
             tolerance,
@@ -290,9 +263,9 @@ fn a_looser_root_tolerance_is_visible_in_the_price() {
     //The reason the tolerance is configurable at all: the old hard-coded 1e-7 capped how
     //accurate a price anyone could get, and now that cap is measurable instead of invisible.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let loose = worst_price_err(1e-4, &yield_curve, &forward_curve, &times);
-    let tight = worst_price_err(1e-14, &yield_curve, &forward_curve, &times);
+    let curve = STEEP_CURVE.curve();
+    let loose = worst_price_err(1e-4, &curve, &times);
+    let tight = worst_price_err(1e-14, &curve, &times);
     println!("tolerance 1e-4 worst price err {loose:e}; 1e-14 worst price err {tight:e}");
     assert!(tight < loose, "tight {tight:e} should beat loose {loose:e}");
     assert!(tight < 1e-11, "tight tolerance left {tight:e}");
@@ -306,9 +279,9 @@ fn the_root_tolerance_bounds_the_search_not_the_achieved_error() {
     //better than the correction's size, so the old 1e-7 cap is no longer a cap on accuracy:
     //1e-7 now lands on the same price as 1e-14 (both sit on the model's round-off floor).
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let legacy_cap = worst_price_err(1e-7, &yield_curve, &forward_curve, &times);
-    let tight = worst_price_err(1e-14, &yield_curve, &forward_curve, &times);
+    let curve = STEEP_CURVE.curve();
+    let legacy_cap = worst_price_err(1e-7, &curve, &times);
+    let tight = worst_price_err(1e-14, &curve, &times);
     println!("tolerance 1e-7 worst price err {legacy_cap:e}; 1e-14 worst price err {tight:e}");
     //A 1e-7 rate error on this instrument is worth ~1e-9 of price; the achieved error is three
     //orders below that, so the legacy tolerance no longer costs accuracy -- only iterations.

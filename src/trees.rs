@@ -21,11 +21,7 @@ fn payoff_swaption(is_payer: bool, swp: f64) -> f64 {
         false => max_or_zero(-swp),
     }
 }
-impl<'a, T, U> HullWhite<'a, T, U>
-where
-    T: Fn(f64) -> f64 + std::marker::Sync,
-    U: Fn(f64) -> f64 + std::marker::Sync,
-{
+impl<'a> HullWhite<'a> {
     fn american_swaption(
         &self,
         r_t: f64,
@@ -95,9 +91,10 @@ where
     /// let num_swap_payments = 16;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let num_tree_steps = 100;
     /// let swaption = hull_white.american_payer_swaption_t(
     ///     r_t, t, option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
@@ -149,9 +146,10 @@ where
     /// let num_swap_payments = 16;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
-    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
-    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let num_tree_steps = 100;
     /// let swaption = hull_white.american_payer_swaption_now(
     ///     option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
@@ -201,9 +199,10 @@ where
     /// let num_swap_payments = 16;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let swap_rate = 0.04; //the swap rate is what the receiver receives if option is exercised
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let num_tree_steps = 100;
     /// let swaption = hull_white.american_receiver_swaption_t(
     ///     r_t, t, option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
@@ -256,9 +255,10 @@ where
     /// let num_swap_payments = 16;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let swap_rate = 0.04; //the swap rate is what the receiver receives if option is exercised
-    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
-    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let num_tree_steps = 100;
     /// let swaption = hull_white.american_receiver_swaption_now(
     ///     option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps

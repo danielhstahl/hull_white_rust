@@ -8,49 +8,161 @@
 //! `r_t` is observed at, `T` (written `t_m` here) the date a moment is taken at, and instruments
 //! add their own coordinates on top (`option_maturity`, `bond_maturity`, `swap_start`, ...).
 //! `phi(t)` is the deterministic function the short rate mean-reverts towards; it is fixed by
-//! requiring the model to fit the initial term structure given by the yield and forward curves.
+//! requiring the model to fit the initial term structure the [`YieldCurve`] it was built from
+//! describes.
 
+use crate::curves::{CurveRef, YieldCurve, validate_curve};
 use crate::error::HullWhiteError;
 use crate::rootfinder::SolverSettings;
 use crate::validation;
 
-/// A one-factor Hull-White model, calibrated to an initial yield curve and an initial forward curve.
+/// A one-factor Hull-White model, calibrated to one initial term structure.
 ///
-/// Built with [`HullWhite::init`]; the curves are borrowed, not owned, so a model is only good for
-/// as long as the closures it was calibrated to.  The struct carries the two model parameters
-/// (`a`, `sigma`) plus the root-finding budget used by the Jamshidian solve; see
-/// [`HullWhite::with_solver`].
-pub struct HullWhite<'a, T, U>
-where
-    T: Fn(f64) -> f64 + std::marker::Sync,
-    U: Fn(f64) -> f64 + std::marker::Sync,
-{
+/// Built with [`HullWhite::new`] from a single [`YieldCurve`], which supplies the cumulative
+/// yield the model discounts with and the instantaneous forward it mean-reverts towards; see
+/// [`crate::curves`] for the trait, the invariant between those two, and the builders that make
+/// one out of a closure ([`from_yield`](crate::from_yield)) or a closure pair
+/// ([`from_yield_and_forward`](crate::from_yield_and_forward)).  The curve is borrowed, not
+/// owned, so a model is only good for as long as the curve it was calibrated to.
+///
+/// The struct carries the two model parameters (`a`, `sigma`), the curve, and the root-finding
+/// budget used by the Jamshidian solve; see [`HullWhite::with_solver`].  It has no closure type
+/// parameters: `HullWhite<'a>` is the whole type, so a function that takes a model says
+/// `&HullWhite` rather than naming two curve closures it does not care about.
+pub struct HullWhite<'a> {
     pub(crate) a: f64,
     pub(crate) sigma: f64,
-    //yield_curve is not divided by time, so this gets perpetually larger (unless rates are negative)
-    pub(crate) yield_curve: &'a T,
-    pub(crate) forward_curve: &'a U,
-    /// Tolerance / iteration budget for the Jamshidian critical-rate solve.  [`HullWhite::init`]
+    //The initial term structure: cumulative yield and instantaneous forward, as one object.
+    //`zero_yield` is not divided by time, so it gets perpetually larger (unless rates are negative).
+    curve: CurveRef<'a>,
+    /// Tolerance / iteration budget for the Jamshidian critical-rate solve.  [`HullWhite::new`]
     /// uses [`SolverSettings::default`]; [`HullWhite::with_solver`] changes it.
     pub(crate) solver: SolverSettings,
 }
-impl<'a, T, U> HullWhite<'a, T, U>
-where
-    T: Fn(f64) -> f64 + std::marker::Sync,
-    U: Fn(f64) -> f64 + std::marker::Sync,
-{
-    pub fn init(
-        a: f64,
-        sigma: f64,
-        yield_curve: &'a T,
-        forward_curve: &'a U,
-    ) -> Result<Self, HullWhiteError> {
+
+/// A `Debug` that shows the model's own numbers.
+///
+/// The curve is a `dyn` object — a trait object has no `Debug` of its own, and printing the
+/// term structure would mean printing a function.  What is worth seeing in a failure message is
+/// `a`, `sigma` and the solver budget, so those are printed and the curve is named rather than
+/// dumped.
+impl core::fmt::Debug for HullWhite<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HullWhite")
+            .field("a", &self.a)
+            .field("sigma", &self.sigma)
+            .field("solver", &self.solver)
+            .field("curve", &"(dyn YieldCurve)")
+            .finish()
+    }
+}
+
+impl<'a> HullWhite<'a> {
+    /// Calibrate a model to one curve.
+    ///
+    /// `a` and `sigma` are checked for positivity and finiteness, and the curve is checked for
+    /// internal consistency: `forward(t)` must equal `d/dt zero_yield(t)` at every time in
+    /// [`CURVE_PROBE_TIMES`](crate::CURVE_PROBE_TIMES), to within
+    /// [`forward_consistency_tolerance`](crate::forward_consistency_tolerance).  A curve that
+    /// fails is [`HullWhiteError::InvalidInput`] naming the worst probe time, the supplied
+    /// forward, the derived one and the tolerance — because a model built on a cumulative yield
+    /// and a forward that disagree does not misprice loudly, it misprices quietly, and the
+    /// disagreement is far cheaper to report here than to hunt down in a book.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hull_white::{HullWhite, from_yield_and_forward};
+    ///
+    /// // Cumulative yield 0.05 t + 0.01 t^2, whose derivative is the forward 0.05 + 0.02 t.
+    /// let curve = from_yield_and_forward(
+    ///     |t: f64| 0.05 * t + 0.01 * t * t,
+    ///     |t: f64| 0.05 + 0.02 * t,
+    /// );
+    /// let hull_white = HullWhite::new(0.15, 0.02, &curve).unwrap();
+    /// assert!(hull_white.bond_price_now(2.0).unwrap() > 0.0);
+    /// ```
+    pub fn new(a: f64, sigma: f64, curve: &'a dyn YieldCurve) -> Result<Self, HullWhiteError> {
         Self::validate_parameters(a, sigma)?;
+        validate_curve(curve)?;
         Ok(Self {
             a,
             sigma,
+            curve: CurveRef::Borrowed(curve),
+            solver: SolverSettings::default(),
+        })
+    }
+
+    /// The curve this model is calibrated to.
+    ///
+    /// Read-only access to the term structure the prices come off: `discount(t)` for `P(0,t)`,
+    /// `zero_yield(t)` for the cumulative yield, `forward(t)` for the instantaneous forward
+    /// `phi(t)` is built on.
+    ///
+    /// ```
+    /// use hull_white::{HullWhite, from_yield};
+    ///
+    /// let curve = from_yield(|t: f64| 0.05 * t);
+    /// let hull_white = HullWhite::new(0.2, 0.03, &curve).unwrap();
+    /// let price = hull_white.bond_price_now(2.0).unwrap();
+    /// assert!((price - hull_white.curve().discount(2.0)).abs() < 1e-15);
+    /// ```
+    #[must_use = "curve() is a borrow of the model's term structure"]
+    pub fn curve(&self) -> &dyn YieldCurve {
+        self.curve.get()
+    }
+
+    /// Calibrate a model from a cumulative-yield closure and a forward closure.
+    ///
+    /// Deprecated: those two closures are one term structure, and passing them separately is what
+    /// let a caller pass two that disagreed.  Build a [`YieldCurve`] instead —
+    /// [`from_yield`](crate::from_yield) when only the cumulative yield is at hand (the forward
+    /// is then derived), [`from_yield_and_forward`](crate::from_yield_and_forward) when both are
+    /// known in closed form, or your own implementor — and pass it to [`HullWhite::new`]:
+    ///
+    /// ```text
+    /// // 0.8
+    /// HullWhite::init(a, sigma, &yield_curve, &forward_curve)
+    /// // 0.9
+    /// HullWhite::new(a, sigma, &from_yield_and_forward(yield_curve, forward_curve))
+    /// ```
+    ///
+    /// The old call still compiles, and now runs the same consistency check: a pair that disagrees
+    /// by more than [`forward_consistency_tolerance`](crate::forward_consistency_tolerance) is an
+    /// error rather than a mispricing.  Note that this is a *behaviour* change as well as a type
+    /// change — pairs that used to price (wrongly) are rejected; the replacement for "I only have
+    /// the yield curve" is [`from_yield`](crate::from_yield).
+    ///
+    /// Removal: this ships deprecated through the whole of `0.9.x` and is removed in `0.10.0`.
+    /// The version bump for the breaking part landed with `0.9.0` (the type collapse); the
+    /// destructor step is deliberately one release behind so a caller can move to the new
+    /// constructor and still compile against the old one while doing it.
+    #[deprecated(
+        since = "0.9.0",
+        note = "two closures for one term structure; use HullWhite::new with a YieldCurve (from_yield / from_yield_and_forward). Removed in 0.10.0"
+    )]
+    pub fn init<F, G>(
+        a: f64,
+        sigma: f64,
+        yield_curve: &'a F,
+        forward_curve: &'a G,
+    ) -> Result<Self, HullWhiteError>
+    where
+        F: Fn(f64) -> f64 + std::marker::Sync,
+        G: Fn(f64) -> f64 + std::marker::Sync,
+    {
+        Self::validate_parameters(a, sigma)?;
+        //`&F` is itself `Fn + Sync` when `F` is, so the wrapper borrows the caller's closures
+        //exactly as the 0.8 struct did; nothing is cloned and nothing is copied out.
+        let curve = Box::new(crate::curves::from_yield_and_forward(
             yield_curve,
             forward_curve,
+        ));
+        validate_curve(curve.as_ref())?;
+        Ok(Self {
+            a,
+            sigma,
+            curve: CurveRef::Owned(curve),
             solver: SolverSettings::default(),
         })
     }
@@ -66,9 +178,10 @@ where
     /// ```
     /// use hull_white::{HullWhite, SolverSettings};
     ///
-    /// let yield_curve = |t: f64| 0.05 * t;
-    /// let forward_curve = |t: f64| t.ln();
-    /// let hull_white = HullWhite::init(0.2, 0.3, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = HullWhite::new(0.2, 0.3, &curve).unwrap();
     /// let tuned = hull_white
     ///     .with_solver(SolverSettings {
     ///         tolerance: 1e-14,
@@ -125,9 +238,10 @@ where
     /// let t = 1.0;
     /// let t_m = 2.0;
     /// let t_f = 3.0;
-    /// let yield_curve = |t:f64|0.05*t;
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white= hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white= hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_vol = hull_white.t_forward_bond_vol(
     ///     t, t_m, t_f
     /// ).unwrap();
@@ -147,7 +261,7 @@ where
     }
     pub(crate) fn phi_t(&self, t: f64) -> f64 {
         let exp_t = 1.0 - (-self.a * t).exp();
-        (self.forward_curve)(t) + (self.sigma * exp_t).powi(2) / (2.0 * self.a.powi(2))
+        self.curve().forward(t) + (self.sigma * exp_t).powi(2) / (2.0 * self.a.powi(2))
     }
     /// Returns volality of bond under the t-forward measure.
     ///
@@ -159,9 +273,10 @@ where
     /// let t = 1.0; //time from "now" (0) to start taking the expectation
     /// let t_m = 2.0; //horizon of the expectation
     /// let r_t = 0.04; //rate at t
-    /// let yield_curve = |t:f64|0.05*t;
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white= hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white= hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_vol = hull_white.mu_r(r_t, t, t_m).unwrap();
     /// ```
     pub fn mu_r(&self, r_t: f64, t: f64, t_m: f64) -> Result<f64, HullWhiteError> {
@@ -182,9 +297,10 @@ where
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let t = 1.0; //time from "now" (0) to start taking the variance
     /// let t_m = 2.0; //horizon of the variance
-    /// let yield_curve = |t:f64|0.05*t;
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let variance = hull_white.variance_r(t, t_m).unwrap();
     /// ```
     pub fn variance_r(&self, t: f64, t_m: f64) -> Result<f64, HullWhiteError> {
@@ -204,37 +320,41 @@ where
     /// (`sigma^2 (1 - e^{-a t})^2 / (2 a^2)`) vanishes at `t = 0`, so
     ///
     /// ```text
-    /// r(0) = phi(0) = forward_curve(0.0)
+    /// r(0) = phi(0) = curve.forward(0.0)
     /// ```
     ///
-    /// i.e. the *instantaneous* forward rate at the front of the curve.  Note which curve that is:
-    /// `forward_curve` is the instantaneous forward `f(0, t)`, while `yield_curve` is cumulative
-    /// (`yield_curve(T)` is the integral of `f(0, .)` over `[0, T]`, which is why
-    /// `bond_price_now` is `exp(-yield_curve(T))`).  So `r(0)` comes off the forward curve, *not*
-    /// off `yield_curve(0.0)`, which is `0` for any curve that is an integral.
+    /// i.e. the *instantaneous* forward rate at the front of the curve.  Note which half of the
+    /// curve that is: `YieldCurve::forward` is the instantaneous forward `f(0, t)`, while
+    /// `YieldCurve::zero_yield` is cumulative (`zero_yield(T)` is the integral of `f(0, .)` over
+    /// `[0, T]`, which is why `bond_price_now` is `exp(-zero_yield(T))`).  So `r(0)` comes off
+    /// the forward, *not* off `zero_yield(0.0)`, which is `0` for any curve that is an integral.
     ///
     /// This is the value to hand a `*_t` function as `r_t` alongside `t = 0.0` when the state has
     /// to be passed explicitly; every `*_now` variant in this crate is exactly that call, and the
     /// two routes agree to machine precision because the same `r(0)` is what makes
     /// `bond_price_t(r(0), 0, T) == bond_price_now(T)`.
     ///
-    /// A curve that is not finite at `0` — `|t| t.ln()`, say, which is `-inf` there — cannot give a
-    /// short rate and is an error rather than a `-inf` price.
+    /// A curve that is not finite at `0` — a `|t| t.ln()` forward, say — cannot give a short rate
+    /// and is an error rather than a `-inf` price.  (It is also a curve the construction check
+    /// tolerates, deliberately: it is consistent with its own yield, it just has no front.  See
+    /// [`CURVE_PROBE_TIMES`](crate::CURVE_PROBE_TIMES).)
     ///
     /// # Examples
     ///
     /// ```
-    /// use hull_white::HullWhite;
+    /// use hull_white::{HullWhite, YieldCurve, from_yield_and_forward};
     ///
     /// // Cumulative yield: 0.05*T + 0.01*T^2 is the integral of 0.05 + 0.02*t.
-    /// let yield_curve = |t: f64| 0.05 * t + 0.01 * t * t;
-    /// // Instantaneous forward curve; finite at 0, as `r(0)` requires.
-    /// let forward_curve = |t: f64| 0.05 + 0.02 * t;
-    /// let hull_white = HullWhite::init(0.15, 0.02, &yield_curve, &forward_curve).unwrap();
+    /// let curve = from_yield_and_forward(
+    ///     |t: f64| 0.05 * t + 0.01 * t * t,
+    ///     // Instantaneous forward; finite at 0, as `r(0)` requires.
+    ///     |t: f64| 0.05 + 0.02 * t,
+    /// );
+    /// let hull_white = HullWhite::new(0.15, 0.02, &curve).unwrap();
     ///
     /// let r0 = hull_white.short_rate_now().unwrap();
     /// assert!((r0 - 0.05).abs() < 1e-12, "r(0) = {r0}");
-    /// assert!((r0 - forward_curve(0.0)).abs() < 1e-12, "r(0) is the forward curve at 0");
+    /// assert!((r0 - curve.forward(0.0)).abs() < 1e-12, "r(0) is the forward curve at 0");
     ///
     /// // Feeding that rate back into the `t` form at `t = 0` reproduces the `now` bond price.
     /// for maturity in [1.0, 3.0, 7.5] {

@@ -14,8 +14,8 @@ fn a_zero_strike_call_is_the_underlying_and_a_zero_strike_put_is_worthless() {
     let times = [2.5, 3.0, 3.5, 4.0];
     for s in FIXTURES.iter() {
         let name = s.name;
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let underlying = hull_white
             .coupon_bond_price_t(0.04, 1.0, &times, 0.05)
             .unwrap();
@@ -38,14 +38,8 @@ fn put_call_parity_holds_whatever_the_strike() {
     //C - P = PV(underlying) - K * P(t,U), to machine precision, including at zero strike.
     //A solve that lands on the wrong critical rate breaks this immediately.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let (r_t, t, u) = (0.04, 1.0, 2.0);
     let underlying = hull_white
         .coupon_bond_price_t(r_t, t, &times, 0.05)
@@ -76,14 +70,8 @@ fn an_extreme_strike_prices_rather_than_erroring() {
     //RootFindingError("NaN") because the old Newton iterate blew up on the flat of the
     //exponential.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     for strike in [1e3f64, 1e8, 1e12] {
         let call = hull_white
             .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, strike)

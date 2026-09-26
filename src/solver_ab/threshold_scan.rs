@@ -117,13 +117,7 @@ fn grid_run(r: f64) -> (f64, usize, f64) {
     let mut n = 0usize;
     for case in grid() {
         let counted = Counted::new(case.curr, case.a, case.b, case.sig);
-        let hw = HullWhite::init(
-            case.a,
-            case.sig,
-            &counted.yield_curve,
-            &counted.forward_curve,
-        )
-        .unwrap();
+        let hw = HullWhite::new(case.a, case.sig, &counted).unwrap();
         let brk = hw.critical_rate_bracket(
             case.option_maturity,
             &case.schedule,

@@ -9,7 +9,7 @@ use approx::*;
 
 use super::{max_or_zero, payoff_swaption};
 use crate::HullWhite;
-use crate::test_support::{STEEP_CURVE, hw_curves};
+use crate::test_support::{STEEP_CURVE, hw_curve};
 
 #[test]
 fn test_max_or_zero() {
@@ -39,8 +39,8 @@ fn european_swaption_tree_matches_analytic_when_t_is_zero() {
     let future_time = 0.0;
     let option_maturity = 1.5;
     let num_swap_payments = 20;
-    let (yield_curve, forward_curve) = hw_curves(curr_rate, a, b, sig);
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let curve = hw_curve(curr_rate, a, b, sig);
+    let hull_white = HullWhite::new(a, sig, &curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
@@ -117,8 +117,8 @@ fn swaption_tree_at_t_is_bit_identical_to_pre_fix() {
         ),
     ];
     for (name, r0, a, b, sig, eur_p, eur_r, amer_p, amer_r) in golden {
-        let (yield_curve, forward_curve) = hw_curves(r0, a, b, sig);
-        let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+        let curve = hw_curve(r0, a, b, sig);
+        let hull_white = HullWhite::new(a, sig, &curve).unwrap();
         let swap_rate = hull_white
             .forward_swap_rate_t(r0, 0.0, option_maturity, num_swap_payments, delta)
             .unwrap();
@@ -206,8 +206,8 @@ fn european_swaption_tree_matches_analytic_when_t_is_nonzero() {
     let future_time = 0.5;
     let option_maturity = 1.5;
     let num_swap_payments = 20;
-    let (yield_curve, forward_curve) = hw_curves(curr_rate, a, b, sig);
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let curve = hw_curve(curr_rate, a, b, sig);
+    let hull_white = HullWhite::new(a, sig, &curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
@@ -275,14 +275,8 @@ fn american_swaption_tree_at_nonzero_t_carries_a_positive_early_exercise_premium
     let future_time = 0.5;
     let option_maturity = 1.5;
     let num_swap_payments = 20;
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             STEEP_CURVE.curr_rate,

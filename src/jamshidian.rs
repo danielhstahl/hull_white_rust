@@ -117,11 +117,7 @@ impl<'a> Deliverable<'a> {
     }
 }
 
-impl<'a, T, U> HullWhite<'a, T, U>
-where
-    T: Fn(f64) -> f64 + std::marker::Sync,
-    U: Fn(f64) -> f64 + std::marker::Sync,
-{
+impl<'a> HullWhite<'a> {
     //The price of a call option on coupon bond under Hull White...uses jamshidian's trick*
     /// A rigorous bracket on the Jamshidian critical rate, or `None` when it cannot be built (in
     /// which case [`rootfinder::solve`] widens around the seed instead).
@@ -168,14 +164,7 @@ where
                 total_weight += coupon_rate;
             }
             let b = at_t(self.a, u, *coupon_time);
-            let c = ct_t(
-                self.a,
-                self.sigma,
-                u,
-                *coupon_time,
-                self.yield_curve,
-                self.forward_curve,
-            );
+            let c = ct_t(self.a, self.sigma, u, *coupon_time, self.curve());
             c_max = c_max.max(c);
             b_min = b_min.min(b);
             b_max = b_max.max(b);
@@ -183,14 +172,7 @@ where
         let w_last = 1.0 + coupon_rate;
         let last_time = coupon_times[last_index];
         let b_last = at_t(self.a, u, last_time);
-        let c_last = ct_t(
-            self.a,
-            self.sigma,
-            u,
-            last_time,
-            self.yield_curve,
-            self.forward_curve,
-        );
+        let c_last = ct_t(self.a, self.sigma, u, last_time, self.curve());
         //Both bounds need non-negative weights.  A coupon_rate at or below -100% breaks them, so
         //hand that nonsense to the widening path instead of trusting a bracket built on sand.
         if !(b_min > 0.0 && b_max > 0.0 && total_weight > 0.0 && w_last > 0.0) {

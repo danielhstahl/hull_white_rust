@@ -13,11 +13,7 @@ use crate::error::HullWhiteError;
 use crate::jamshidian::Side;
 use crate::validation;
 
-impl<'a, T, U> HullWhite<'a, T, U>
-where
-    T: Fn(f64) -> f64 + std::marker::Sync,
-    U: Fn(f64) -> f64 + std::marker::Sync,
-{
+impl<'a> HullWhite<'a> {
     /// Returns price of a call option on zero coupon bond at some future time
     ///
     /// # Examples
@@ -30,9 +26,10 @@ where
     /// let option_maturity = 1.5;
     /// let bond_maturity = 2.0;
     /// let strike = 0.98;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_call = hull_white.bond_call_t(r_t, t, option_maturity, bond_maturity, strike).unwrap();
     /// ```
     pub fn bond_call_t(
@@ -71,9 +68,10 @@ where
     /// let option_maturity = 1.5;
     /// let bond_maturity = 2.0;
     /// let strike = 0.98;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_call = hull_white.bond_call_now(option_maturity, bond_maturity, strike).unwrap();
     /// ```
     pub fn bond_call_now(
@@ -115,8 +113,8 @@ where
     /// A schedule with nothing strictly after `option_maturity` is refused: the bond is settled
     /// before the option can be exercised, so there is nothing to deliver.  Dropping the
     /// pre-expiry coupons cannot change the price, so the full schedule and the post-expiry tail
-    /// alone price identically (see the example).  The full reasoning is in
-    /// [`crate::jamshidian`].
+    /// alone price identically (see the example).  The full reasoning is in the `jamshidian`
+    /// module (`src/jamshidian.rs`).
     ///
     /// # Examples
     ///
@@ -130,9 +128,10 @@ where
     /// let coupon_times = vec![1.25, 1.5, 1.75, 2.0, 2.25, 2.5];
     /// let coupon_rate = 0.05;
     /// let strike = 1.0;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let call = hull_white.coupon_bond_call_t(r_t, t, option_maturity, &coupon_times, coupon_rate, strike).unwrap();
     /// //Dropping the one coupon paid strictly before expiry (1.25) cannot change the price: it is
     /// //not part of the bond the holder gets on the expiry date.
@@ -186,9 +185,10 @@ where
     /// let coupon_times = vec![1.75, 2.0, 2.25, 2.5];
     /// let coupon_rate = 0.05;
     /// let strike = 1.0;
-    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
-    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let call = hull_white.coupon_bond_call_now(option_maturity, &coupon_times, coupon_rate, strike).unwrap();
     /// //Same number as the `t` form seeded with the initial short rate.
     /// let r0 = hull_white.short_rate_now().unwrap();
@@ -221,9 +221,10 @@ where
     /// let option_maturity = 1.5;
     /// let bond_maturity = 2.0;
     /// let strike = 0.98;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_put = hull_white.bond_put_t(r_t, t, option_maturity, bond_maturity, strike).unwrap();
     /// ```
     pub fn bond_put_t(
@@ -262,9 +263,10 @@ where
     /// let option_maturity = 1.5;
     /// let bond_maturity = 2.0;
     /// let strike = 0.98;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_put = hull_white.bond_put_now(option_maturity, bond_maturity, strike).unwrap();
     /// ```
     pub fn bond_put_now(
@@ -297,7 +299,7 @@ where
     /// dropped (the holder never receives them), a coupon falling exactly on `option_maturity` is
     /// cash on the expiry date and is subtracted from the strike, and only coupons strictly after
     /// `option_maturity` are decomposed.  A schedule with nothing strictly after the expiry is
-    /// refused.  See [`crate::jamshidian`] for the reasoning.
+    /// refused.  See the `jamshidian` module (`src/jamshidian.rs`) for the reasoning.
     ///
     /// # Examples
     ///
@@ -311,9 +313,10 @@ where
     /// let coupon_times = vec![1.25, 1.5, 1.75, 2.0, 2.25, 2.5];
     /// let coupon_rate = 0.05;
     /// let strike = 1.0;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_put = hull_white.coupon_bond_put_t(r_t, t, option_maturity, &coupon_times, coupon_rate, strike).unwrap();
     /// //The pre-expiry coupon is not part of the underlying: dropping it leaves the price alone.
     /// let tail = vec![1.5, 1.75, 2.0, 2.25, 2.5];
@@ -358,9 +361,10 @@ where
     /// let coupon_times = vec![1.75, 2.0, 2.25, 2.5];
     /// let coupon_rate = 0.05;
     /// let strike = 1.0;
-    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
-    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let put = hull_white.coupon_bond_put_now(option_maturity, &coupon_times, coupon_rate, strike).unwrap();
     /// let r0 = hull_white.short_rate_now().unwrap();
     /// let via_t = hull_white

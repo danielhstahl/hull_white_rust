@@ -17,9 +17,8 @@ fn zero_coupon_reference() {
     let future_time = 0.0;
     let bond_maturity = 3.0;
     let option_maturity = 2.0;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let bond_call = hull_white
         .bond_call_t(
             curr_rate,
@@ -40,9 +39,8 @@ fn zero_coupon_to_coupon() {
     let future_time = 0.0;
     let bond_maturity = 3.0;
     let option_maturity = 2.0;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let bond_call = hull_white
         .bond_call_t(
             curr_rate,
@@ -73,14 +71,8 @@ fn zero_coupon_to_coupon() {
 /// instrument: `r(0)` from `short_rate_now` is the state, and nothing else about the price changes.
 #[test]
 fn coupon_bond_option_now_matches_the_t_form_at_zero() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let r0 = hull_white.short_rate_now().unwrap();
     let coupon_times = [1.75, 2.0, 2.25, 2.5];
     let coupon_rate = 0.05;
@@ -112,14 +104,8 @@ fn coupon_bond_option_now_matches_the_t_form_at_zero() {
 /// the option on a different side of the money, so a one-sided error in the leg strikes would show.
 #[test]
 fn coupon_bond_option_parity_at_now() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let coupon_times = [1.75, 2.0, 2.25, 2.5];
     let coupon_rate = 0.05;
     let option_maturity = 1.5;
@@ -155,14 +141,8 @@ fn coupon_bond_option_parity_at_now() {
 /// underlying, and the coupon settling on the expiry date is a strike reduction on the residual.
 #[test]
 fn coupon_bond_option_now_keeps_the_straddle_convention() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let option_maturity = 1.5;
     let coupon_rate = 0.05;
     let full = [1.25, 1.5, 1.75, 2.0, 2.25, 2.5];

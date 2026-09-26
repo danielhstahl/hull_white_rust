@@ -1,7 +1,7 @@
 //! Tests for the fixture itself.
 //!
-//! These exist because the shared curves replaced ~50 hand-copied ones: if the replacement were
-//! not the same maths, every test that prices off it would drift quietly.  So the pair is pinned
+//! These exist because the shared curve replaced ~50 hand-copied ones: if the replacement were
+//! not the same maths, every test that prices off it would drift quietly.  So the curve is pinned
 //! three ways — to its own algebra (`y` is the integral of `F`, `F(0)` is the spot), to golden
 //! values computed independently of this file, and to the model's own bond pricer.
 
@@ -19,26 +19,26 @@ use crate::test_support::*;
 #[test]
 fn every_scenario_is_internally_consistent() {
     for s in ALL_SCENARIOS {
-        let (yield_curve, forward_curve) = s.curves();
-        assert_abs_diff_eq!(yield_curve(0.0), 0.0, epsilon = 1e-15);
-        assert_abs_diff_eq!(forward_curve(0.0), s.curr_rate, epsilon = 1e-15);
+        let curve = s.curve();
+        assert_abs_diff_eq!(curve.zero_yield(0.0), 0.0, epsilon = 1e-15);
+        assert_abs_diff_eq!(curve.forward(0.0), s.curr_rate, epsilon = 1e-15);
         // Central difference: truncation error is O(h^2) and rounding O(eps/h), which at
         // h = 1e-5 leaves ~1e-11 on the sloppiest of these calibrations.
         let h = 1e-5;
         for t in [0.25, 0.5, 1.0, 2.0, 5.0, 10.0] {
-            let slope = (yield_curve(t + h) - yield_curve(t - h)) / (2.0 * h);
-            assert_abs_diff_eq!(slope, forward_curve(t), epsilon = 1e-9);
+            let slope = (curve.zero_yield(t + h) - curve.zero_yield(t - h)) / (2.0 * h);
+            assert_abs_diff_eq!(slope, curve.forward(t), epsilon = 1e-9);
         }
     }
 }
 
 /// Golden values, computed from the same closed form outside this crate (double-precision
-/// arithmetic on the formulas in [`hw_curves`]' doc), and so a description of what the
+/// arithmetic on the formulas in [`HwCurve`]'s doc), and so a description of what the
 /// copy-pasted fixture used to produce rather than of what this code happens to compute.
 #[allow(clippy::excessive_precision)]
 #[test]
 fn fixture_matches_golden_curve_values() {
-    // (scenario, t, yield_curve(t), forward_curve(t))
+    // (scenario, t, zero_yield(t), forward(t))
     let goldens: [(Scenario, f64, f64, f64); 15] = [
         (
             BASELINE,
@@ -132,9 +132,9 @@ fn fixture_matches_golden_curve_values() {
         ),
     ];
     for (s, t, y, f) in goldens {
-        let (yield_curve, forward_curve) = s.curves();
-        assert_abs_diff_eq!(yield_curve(t), y, epsilon = 1e-12);
-        assert_abs_diff_eq!(forward_curve(t), f, epsilon = 1e-12);
+        let curve = s.curve();
+        assert_abs_diff_eq!(curve.zero_yield(t), y, epsilon = 1e-12);
+        assert_abs_diff_eq!(curve.forward(t), f, epsilon = 1e-12);
     }
 }
 
@@ -143,20 +143,20 @@ fn fixture_matches_golden_curve_values() {
 #[test]
 fn fixture_prices_are_what_the_model_says_they_are() {
     for s in ALL_SCENARIOS {
-        let (yield_curve, forward_curve) = s.curves();
-        let model = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let model = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         for t in [0.25, 1.0, 3.0, 7.5] {
             assert_abs_diff_eq!(
                 model.bond_price_now(t).unwrap(),
-                (-yield_curve(t)).exp(),
+                (-curve.zero_yield(t)).exp(),
                 epsilon = 1e-15
             );
         }
         // `short_rate_now` is the instantaneous forward at the front of the curve, so it is
-        // `phi(0)`, which is `forward_curve(0.0)`.
+        // `phi(0)`, which is `curve.forward(0.0)`.
         assert_abs_diff_eq!(
             model.short_rate_now().unwrap(),
-            forward_curve(0.0),
+            curve.forward(0.0),
             epsilon = 1e-15
         );
     }
@@ -193,7 +193,7 @@ fn scenarios_are_distinct() {
 /// against the flat fixture would stop being the cheap ones they claim to be.
 #[test]
 fn the_scenario_names_describe_the_curves() {
-    let forward_at = |s: Scenario, t: f64| s.curves().1(t);
+    let forward_at = |s: Scenario, t: f64| s.curve().forward(t);
 
     // Flat: 5% spot, and the forward barely moves over ten years.
     assert!(
@@ -240,8 +240,8 @@ fn the_scenario_names_describe_the_curves() {
 fn low_vol_collapses_the_convexity_terms() {
     // (edf-vs-forward gap, at-the-money caplet as a share of `delta * forward`)
     let measure = |s: Scenario| {
-        let (yield_curve, forward_curve) = s.curves();
-        let model = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let model = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let option_maturity = 1.5;
         let forward = model
             .forward_libor_rate_now(option_maturity, s.delta)
@@ -282,15 +282,21 @@ fn low_vol_collapses_the_convexity_terms() {
     );
 }
 
-/// `Scenario::curves` is `hw_curves` with the scenario's numbers, not a second implementation.
+/// `Scenario::curve` is [`hw_curve`] with the scenario's numbers, not a second implementation.
 #[test]
-fn scenario_curves_are_just_hw_curves() {
+fn scenario_curves_are_just_hw_curve() {
     for s in ALL_SCENARIOS {
-        let (a_y, a_f) = s.curves();
-        let (b_y, b_f) = hw_curves(s.curr_rate, s.a, s.b, s.sigma);
+        let by_scenario = s.curve();
+        let by_parameters = hw_curve(s.curr_rate, s.a, s.b, s.sigma);
+        assert_eq!(
+            by_scenario, by_parameters,
+            "{} is not the same curve as its own numbers",
+            s.name
+        );
+        //...and bit-identical where they are evaluated, not merely equal as a struct.
         for t in [0.0, 0.5, 2.5, 20.0] {
-            assert_eq!(a_y(t), b_y(t));
-            assert_eq!(a_f(t), b_f(t));
+            assert_eq!(by_scenario.zero_yield(t), by_parameters.zero_yield(t));
+            assert_eq!(by_scenario.forward(t), by_parameters.forward(t));
         }
     }
 }

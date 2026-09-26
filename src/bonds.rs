@@ -53,11 +53,7 @@ pub(crate) fn coupon_bond_generic_now(
         })
         .sum()
 }
-impl<'a, T, U> HullWhite<'a, T, U>
-where
-    T: Fn(f64) -> f64 + std::marker::Sync,
-    U: Fn(f64) -> f64 + std::marker::Sync,
-{
+impl<'a> HullWhite<'a> {
     /// Returns price of a zero coupon bond at some future date
     /// given the interest rate at that future date
     ///
@@ -69,9 +65,10 @@ where
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let t = 1.0; //time from "now" (0) to start valuing the bond
     /// let bond_maturity = 2.0;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_price = hull_white.bond_price_t(r_t, t, bond_maturity).unwrap();
     /// ```
     pub fn bond_price_t(
@@ -91,30 +88,13 @@ where
     /// (and having to propagate) the checks again.
     pub(crate) fn bond_price_t_raw(&self, r_t: f64, t: f64, bond_maturity: f64) -> f64 {
         (-r_t * at_t(self.a, t, bond_maturity)
-            + ct_t(
-                self.a,
-                self.sigma,
-                t,
-                bond_maturity,
-                self.yield_curve,
-                self.forward_curve,
-            ))
+            + ct_t(self.a, self.sigma, t, bond_maturity, self.curve()))
         .exp()
     }
     //used for newton's method
     pub(crate) fn bond_price_t_deriv(&self, r_t: f64, t: f64, bond_maturity: f64) -> f64 {
         let at_t_c = at_t(self.a, t, bond_maturity);
-        -(-r_t * at_t_c
-            + ct_t(
-                self.a,
-                self.sigma,
-                t,
-                bond_maturity,
-                self.yield_curve,
-                self.forward_curve,
-            ))
-        .exp()
-            * at_t_c
+        -(-r_t * at_t_c + ct_t(self.a, self.sigma, t, bond_maturity, self.curve())).exp() * at_t_c
     }
     /// Returns price of a zero coupon bond at current date
     ///
@@ -124,9 +104,10 @@ where
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let bond_maturity = 2.0;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_price = hull_white.bond_price_now(bond_maturity).unwrap();
     /// ```
     pub fn bond_price_now(&self, bond_maturity: f64) -> Result<f64, HullWhiteError> {
@@ -136,7 +117,7 @@ where
     /// Unvalidated counterpart of [`HullWhite::bond_price_now`], for internals that have already
     /// checked their arguments.
     pub(crate) fn bond_price_now_raw(&self, bond_maturity: f64) -> f64 {
-        (-(self.yield_curve)(bond_maturity)).exp()
+        self.curve().discount(bond_maturity)
     }
     /// Returns price of a coupon bond at some future date
     ///
@@ -149,9 +130,10 @@ where
     /// let t = 1.0; //time from "now" (0) to start valuing the bond
     /// let coupon_times = vec![1.25, 1.5, 1.75, 2.0]; //measure time from now (0), all should be greater than t.  Final coupon is the bond maturity
     /// let coupon_rate = 0.05;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_price = hull_white.coupon_bond_price_t(r_t, t, &coupon_times, coupon_rate).unwrap();
     /// ```
     pub fn coupon_bond_price_t(
@@ -202,9 +184,10 @@ where
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let coupon_times = vec![1.25, 1.5, 1.75, 2.0]; //measure time from now (0), all should be greater than t.  Final coupon is the bond maturity
     /// let coupon_rate = 0.05;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_price = hull_white.coupon_bond_price_now(&coupon_times, coupon_rate).unwrap();
     /// ```
     pub fn coupon_bond_price_now(

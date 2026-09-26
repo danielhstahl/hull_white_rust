@@ -12,7 +12,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::test_support::hw_curves;
+use crate::curves::YieldCurve;
+use crate::test_support::{HwCurve, hw_curve};
 
 // The pre-rootfinder configuration, verbatim from the implementation this replaced: bare Newton
 // from a hard-coded 3% (`nrfind::find_root(&f, &df, R_INIT, PREC_1, MAX_ITER)`), converged on
@@ -36,45 +37,44 @@ pub(super) fn reps() -> usize {
         .unwrap_or(25)
 }
 
-/// Counting stand-ins for the market curves.
+/// The shared [`hw_curve`] fixture with a call counter bolted on.
 ///
-/// Every zero-coupon leg price funnels through the yield and forward curves, so a count of curve
-/// calls is a measure of model work that no solver can game.
+/// Every zero-coupon leg price funnels through the yield and the forward curve, so a count of
+/// curve calls is a measure of model work that no solver can game.  This is the *real* fixture
+/// curve, counted: `zero_yield` and `forward` both delegate to [`HwCurve`] and bump `calls` on
+/// the way through.
 ///
-/// The yield curve is the shared [`hw_curves`] fixture with a counter wrapped around it, so the
-/// harness measures the same curve the tests price off.  The forward curve deliberately is *not*
-/// the fixture's: the harness only ever compares this solver against the old one over the same
-/// inputs, and a cheap stand-in keeps the measured call count the thing being measured.  Swapping
-/// in the real one would move every table in the A/B report without saying anything new.
+/// It used to wrap a cheap stand-in for the forward (`curr - b e^{-a t}`, not the fixture's).
+/// That is not available any more: a model now checks that its forward is the derivative of its
+/// own yield at construction, and a stand-in that convenient is not.  Which was the point — the
+/// harness measures the *solve*, and an inconsistent curve makes "what would the old solve have
+/// answered" a question about a model nobody could have calibrated.  The measurement is
+/// unaffected by the switch: both closures were one counter bump per call, so the `curve_calls`
+/// column counts exactly what it counted before, and the always-on guard moved from
+/// `5.4 iters avg / 1,442 evals / 832 old evals (1.73x)` to `5.5 / 1,448 / 864 (1.68x)` on
+/// the 84-case production grid — same solve, real curve.
 pub(super) struct Counted {
-    pub(super) yield_curve: Box<dyn Fn(f64) -> f64 + Sync>,
-    pub(super) forward_curve: Box<dyn Fn(f64) -> f64 + Sync>,
+    curve: HwCurve,
     pub(super) calls: Arc<AtomicUsize>,
 }
 
 impl Counted {
     pub(super) fn new(curr: f64, a: f64, b: f64, sig: f64) -> Self {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let yield_curve = {
-            let calls = calls.clone();
-            let fixture = hw_curves(curr, a, b, sig).0;
-            Box::new(move |t: f64| {
-                calls.fetch_add(1, Ordering::Relaxed);
-                fixture(t)
-            })
-        };
-        let forward_curve = {
-            let calls = calls.clone();
-            Box::new(move |t: f64| {
-                calls.fetch_add(1, Ordering::Relaxed);
-                curr - b * (-a * t).exp()
-            })
-        };
         Self {
-            yield_curve,
-            forward_curve,
-            calls,
+            curve: hw_curve(curr, a, b, sig),
+            calls: Arc::new(AtomicUsize::new(0)),
         }
+    }
+}
+
+impl YieldCurve for Counted {
+    fn zero_yield(&self, t: f64) -> f64 {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.curve.zero_yield(t)
+    }
+    fn forward(&self, t: f64) -> f64 {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.curve.forward(t)
     }
 }
 

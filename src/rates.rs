@@ -18,11 +18,7 @@ use crate::curves::{compute_libor_rate, edf_compute, gamma_edf};
 use crate::error::HullWhiteError;
 use crate::validation;
 
-impl<'a, T, U> HullWhite<'a, T, U>
-where
-    T: Fn(f64) -> f64 + std::marker::Sync,
-    U: Fn(f64) -> f64 + std::marker::Sync,
-{
+impl<'a> HullWhite<'a> {
     /// Returns price of a caplet at current time
     ///
     /// # Examples
@@ -33,9 +29,10 @@ where
     /// let option_maturity = 1.5;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let strike = 0.04;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let caplet = hull_white.caplet_now(option_maturity, delta, strike).unwrap();
     /// ```
     pub fn caplet_now(
@@ -65,9 +62,10 @@ where
     /// let option_maturity = 1.5;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let strike = 0.04;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let caplet = hull_white.caplet_t(r_t, t, option_maturity, delta, strike).unwrap();
     /// ```
     pub fn caplet_t(
@@ -121,9 +119,10 @@ where
     /// let option_maturity = 1.5;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let strike = 0.04;
-    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
-    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let floorlet = hull_white.floorlet_now(option_maturity, delta, strike).unwrap();
     /// let caplet = hull_white.caplet_now(option_maturity, delta, strike).unwrap();
     /// assert!(floorlet > 0.0, "floorlet {floorlet}");
@@ -163,9 +162,10 @@ where
     /// let option_maturity = 1.5;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let strike = 0.04;
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let floorlet = hull_white.floorlet_t(r_t, t, option_maturity, delta, strike).unwrap();
     /// let caplet = hull_white.caplet_t(r_t, t, option_maturity, delta, strike).unwrap();
     /// let near = hull_white.bond_price_t(r_t, t, option_maturity).unwrap();
@@ -214,9 +214,10 @@ where
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// //A three period cap, each period with its own strike.
     /// let periods = [(1.0, 0.04), (1.25, 0.045), (1.5, 0.05)];
-    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
-    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let cap = hull_white.cap_now(&periods, delta).unwrap();
     /// let caplets: f64 = periods
     ///     .iter()
@@ -252,9 +253,10 @@ where
     /// let t = 1.0; //time from "now" (0) to start valuing
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let periods = [(1.5, 0.04), (1.75, 0.045), (2.0, 0.05)];
-    /// let yield_curve = |t:f64|0.05*t;
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let cap = hull_white.cap_t(r_t, t, &periods, delta).unwrap();
     /// let caplets: f64 = periods
     ///     .iter()
@@ -298,9 +300,10 @@ where
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let periods = [(1.0, 0.04), (1.25, 0.045), (1.5, 0.05)];
-    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
-    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let cap = hull_white.cap_now(&periods, delta).unwrap();
     /// let floor = hull_white.floor_now(&periods, delta).unwrap();
     /// let legs: f64 = periods
@@ -338,9 +341,10 @@ where
     /// let t = 1.0; //time from "now" (0) to start valuing
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// let periods = [(1.5, 0.04), (1.75, 0.045), (2.0, 0.05)];
-    /// let yield_curve = |t:f64|0.05*t;
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let floor = hull_white.floor_t(r_t, t, &periods, delta).unwrap();
     /// let floorlets: f64 = periods
     ///     .iter()
@@ -379,9 +383,10 @@ where
     /// let t = 1.0; //time from "now" (0) to start valuing the bond
     /// let option_maturity = 1.5;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let edf = hull_white.euro_dollar_future_t(r_t,  t, option_maturity, delta).unwrap();
     /// ```
     pub fn euro_dollar_future_t(
@@ -415,9 +420,10 @@ where
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let option_maturity = 1.5;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let edf = hull_white.euro_dollar_future_now(option_maturity, delta).unwrap();
     /// ```
     pub fn euro_dollar_future_now(
@@ -449,9 +455,10 @@ where
     /// let t = 1.0; //time from "now" (0) to start valuing the bond
     /// let maturity = 1.5;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let forward_libor = hull_white.forward_libor_rate_t(r_t, t, maturity, delta).unwrap();
     /// ```
     pub fn forward_libor_rate_t(
@@ -483,9 +490,10 @@ where
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let maturity = 1.5;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let forward_libor = hull_white.forward_libor_rate_now(maturity, delta).unwrap();
     /// ```
     pub fn forward_libor_rate_now(&self, maturity: f64, delta: f64) -> Result<f64, HullWhiteError> {
@@ -508,9 +516,10 @@ where
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let t = 1.0; //time from "now" (0) to start valuing the bond
     /// let delta = 0.25; //delta is the tenor of the Libor rate
-    /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
-    /// let forward_curve = |t:f64|t.ln();
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let libor = hull_white.libor_rate_t(r_t, t, delta).unwrap();
     /// ```
     pub fn libor_rate_t(&self, r_t: f64, t: f64, delta: f64) -> Result<f64, HullWhiteError> {
@@ -531,9 +540,10 @@ where
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let delta = 0.25; //delta is the tenor of the Libor rate
-    /// let yield_curve = |t:f64|0.05*t + 0.01*t*t; //cumulative yield: the integral of the forward curve
-    /// let forward_curve = |t:f64|0.05 + 0.02*t; //instantaneous forward, finite at 0
-    /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
+    /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
+    /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let spot = hull_white.libor_rate_now(delta).unwrap();
     /// //Same instrument as the forward fixing starting today, and as the `t` form run at `t = 0`
     /// //with the model's own initial short rate.

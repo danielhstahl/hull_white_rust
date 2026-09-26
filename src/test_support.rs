@@ -1,18 +1,40 @@
 //! Shared, self-consistent market-data fixtures for this crate's tests and benches.
 //!
-//! Every pricer here is driven by two curves: a *cumulative* `yield_curve`
-//! (`bond_price_now(T) = exp(-yield_curve(T))`, the integral of the forward curve) and an
-//! instantaneous `forward_curve`.  Tests and benches need a pair that is *internal* to the model
-//! it calibrates, so a fixture is built from a Vasicek short rate reverting to `b` at speed `a`
-//! with volatility `sigma`, started at `curr_rate`.  For that pair the model's closed forms are
-//! exact, so a test can put `x_now` against `x_t`, or a Monte-Carlo average against an analytic
-//! price, without a second pricer to disagree with — and a time-coordinate error cannot hide,
-//! because both curves carry the same convexity the model carries.
+//! Every model here is calibrated to one curve: a [`YieldCurve`] whose `zero_yield` is the
+//! cumulative yield (`bond_price_now(T) = exp(-zero_yield(T))`) and whose `forward` is the
+//! instantaneous forward that yield is the integral of.  Tests and benches need a curve that is
+//! *internal* to the model it calibrates, so a fixture is built from a Vasicek short rate
+//! reverting to `b` at speed `a` with volatility `sigma`, started at `curr_rate`.  For that
+//! curve the model's closed forms are exact, so a test can put `x_now` against `x_t`, or a
+//! Monte-Carlo average against an analytic price, without a second pricer to disagree with — and
+//! a time-coordinate error cannot hide, because the yield and the forward carry the same
+//! convexity the model carries.
+//!
+//! That last property is also what makes the fixture clear the construction-time consistency
+//! check with room to spare.  Measured worst disagreement over the seven scenarios, `forward(t)`
+//! against the finite-difference derivative of `zero_yield(t)`:
+//!
+//! ```text
+//! scenario            worst |diff|   at t     tolerance
+//! baseline            5.0e-14      10.0     3.7e-6
+//! vasicek_reference   9.5e-13       0.25    1.0e-6
+//! flat_5pct           1.3e-13       0.25    5.0e-6
+//! steep_curve         1.2e-13       1.0     2.7e-6
+//! high_vol            2.0e-12       0.5     5.1e-6
+//! quick_reversion     4.8e-14       5.0     4.3e-6
+//! low_vol             6.1e-14       5.0     5.0e-6
+//! ```
+//!
+//! Six orders of headroom on the loosest scenario, all of it finite-difference rounding on the
+//! check's side rather than sloppiness in the fixture.  That is not true of the ad-hoc curve
+//! pairs that used to be pasted around this suite: the crate's own long-standing example pair
+//! (`0.05 * t` cumulative yield against `t.ln()` forward) is off by order unity and would not
+//! build a model at all today.
 //!
 //! This maths used to be copy-pasted into every test and bench.  It is written once, in
-//! [`hw_curves`], and nothing else repeats it:
+//! [`HwCurve`], and nothing else repeats it:
 //!
-//! * [`hw_curves`] is the maths, for the rare test that needs an off-scenario calibration.
+//! * [`hw_curve`] is the maths, for the rare test that needs an off-scenario calibration.
 //! * [`Scenario`] names one calibration of it — `curr_rate`, `a`, `b`, `sigma`, plus `delta`,
 //!   the period length the instruments built on it are quoted on.  A test says which part of the
 //!   parameter space it covers by *name*, instead of by four unexplained literals next to a
@@ -48,7 +70,9 @@
 //! and cannot see `cfg(test)` items.  It is `#[doc(hidden)]`: it is not part of the public
 //! surface of this crate.
 
-/// The Hull-White-consistent `(yield_curve, forward_curve)` pair for one calibration.
+use crate::curves::YieldCurve;
+
+/// The Hull-White-consistent initial curve for one calibration, as a single [`YieldCurve`].
 ///
 /// This is the whole fixture maths, and the only place it appears:
 ///
@@ -60,41 +84,75 @@
 ///          - (sigma^2 / 2a^2) (1 - e^{-a t})^2                 instantaneous forward
 /// ```
 ///
-/// `F(t)` is the model's own `phi(t)`, and `y` is its integral, which is what makes
-/// `exp(-y(T))` the exact `T`-maturity bond price under the model these curves calibrate.
-/// Both closures take `t` as *time from now*, the same convention as every pricer in the crate.
+/// `F(t)` is the model's own `phi(t)` minus its volatility term, and `y` is its integral, which
+/// is what makes `exp(-y(T))` the exact `T`-maturity bond price under the model these curves
+/// calibrate.  Both accessors take `t` as *time from now*, the same convention as every pricer in
+/// the crate, and both are closed form — the construction-time consistency check compares
+/// `forward` against a finite difference of `zero_yield` and finds them agreeing to about
+/// `1e-12` (worst measured case, `high_vol`) where the tolerance is `1e-6`, so nothing here
+/// pays for a finite difference in the price either.
 ///
-/// Reach for a [`Scenario`] rather than this function unless the calibration is genuinely a
-/// one-off; a bare `hw_curves(0.017, 0.13, ...)` call tells a reader nothing about which corner
+/// The shape is one object on purpose: a fixture that hands back a `(yield, forward)` *tuple* is
+/// a fixture that can be edited apart, which is the exact failure mode the 52 copies of this
+/// maths used to invite.  [`hw_curve`] builds it; [`Scenario::curve`] is the same thing with a
+/// name attached.
+///
+/// Reach for a [`Scenario`] rather than [`hw_curve`] unless the calibration is genuinely a
+/// one-off; a bare `hw_curve(0.017, 0.13, ...)` call tells a reader nothing about which corner
 /// of the parameter space the test covers.
-pub fn hw_curves(
-    curr_rate: f64,
-    a: f64,
-    b: f64,
-    sigma: f64,
-) -> (
-    impl Fn(f64) -> f64 + Send + Sync,
-    impl Fn(f64) -> f64 + Send + Sync,
-) {
-    let yield_curve = move |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct =
-            (b - sigma.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sigma * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = move |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sigma.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    (yield_curve, forward_curve)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HwCurve {
+    /// Short rate at `t = 0`, which is also the front of the forward curve (`forward(0.0)`).
+    pub curr_rate: f64,
+    /// Mean-reversion speed of the underlying Vasicek/Hull-White short rate.
+    pub a: f64,
+    /// Long-run mean the short rate reverts to.
+    pub b: f64,
+    /// Short-rate volatility.
+    pub sigma: f64,
 }
 
-/// One named calibration of [`hw_curves`].
+impl HwCurve {
+    fn duration(&self, t: f64) -> f64 {
+        (1.0 - (-self.a * t).exp()) / self.a
+    }
+}
+
+impl YieldCurve for HwCurve {
+    /// `y(t) = a(t) * curr_rate - c(t)`, the integral of [`HwCurve::forward`].
+    fn zero_yield(&self, t: f64) -> f64 {
+        let at = self.duration(t);
+        let ct = (self.b - self.sigma.powi(2) / (2.0 * self.a.powi(2))) * (at - t)
+            - (self.sigma * at).powi(2) / (4.0 * self.a);
+        at * self.curr_rate - ct
+    }
+
+    /// `F(t) = b + e^{-a t} (curr_rate - b) - (sigma^2 / 2a^2) (1 - e^{-a t})^2`, the
+    /// derivative of [`HwCurve::zero_yield`], and `phi(t)` with its volatility term taken back off.
+    fn forward(&self, t: f64) -> f64 {
+        self.b + (-self.a * t).exp() * (self.curr_rate - self.b)
+            - (self.sigma.powi(2) / (2.0 * self.a.powi(2))) * (1.0 - (-self.a * t).exp()).powi(2)
+    }
+}
+
+/// The [`HwCurve`] for `curr_rate` / `a` / `b` / `sigma`.
+///
+/// Prefer [`Scenario::curve`] so the calibration has a name.
+pub fn hw_curve(curr_rate: f64, a: f64, b: f64, sigma: f64) -> HwCurve {
+    HwCurve {
+        curr_rate,
+        a,
+        b,
+        sigma,
+    }
+}
+
+/// One named calibration of [`hw_curve`].
 ///
 /// The four model numbers plus `delta`, the accrual period the instruments priced off the
 /// scenario are quoted on.  Cheap `Copy` value: take what a test needs
 /// (`let curr_rate = FLAT_5PCT.curr_rate;`) or the curves straight off it
-/// (`let (yield_curve, forward_curve) = FLAT_5PCT.curves();`).
+/// (`let curve = FLAT_5PCT.curve();`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scenario {
     /// The scenario's name, for assertion messages and for grepping this file.
@@ -112,14 +170,10 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    /// This scenario's `(yield_curve, forward_curve)` pair.
-    pub fn curves(
-        self,
-    ) -> (
-        impl Fn(f64) -> f64 + Send + Sync,
-        impl Fn(f64) -> f64 + Send + Sync,
-    ) {
-        hw_curves(self.curr_rate, self.a, self.b, self.sigma)
+    /// This scenario's curve, as the single [`YieldCurve`] a [`HullWhite`](crate::HullWhite) is
+    /// built from.
+    pub fn curve(self) -> HwCurve {
+        hw_curve(self.curr_rate, self.a, self.b, self.sigma)
     }
 }
 
@@ -256,14 +310,8 @@ macro_rules! hw_setup {
     };
     ($model:ident, $scenario:expr) => {
         let __scenario = $scenario;
-        let (__yield_curve, __forward_curve) = __scenario.curves();
-        let $model = $crate::HullWhite::init(
-            __scenario.a,
-            __scenario.sigma,
-            &__yield_curve,
-            &__forward_curve,
-        )
-        .unwrap();
+        let __curve = __scenario.curve();
+        let $model = $crate::HullWhite::new(__scenario.a, __scenario.sigma, &__curve).unwrap();
     };
 }
 

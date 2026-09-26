@@ -14,14 +14,8 @@ use crate::test_support::{BASELINE, STEEP_CURVE};
 fn swap_price_t_anchors_at_t_for_whole_non_binary_schedules() {
     //Needs a curve that moves: on a flat curve a one-period anchor shift is nearly free, which is
     //why the legacy fixture never showed this.
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let r_t = STEEP_CURVE.curr_rate;
     let swap_rate = 0.045;
     for (t, swap_maturity, delta, num_payments) in [
@@ -58,9 +52,8 @@ fn test_swap() {
     let future_time = 0.5;
     let swap_maturity = 5.5;
     let num_swap_payments = 20;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     assert_abs_diff_eq!(
         hull_white
             .swap_price_t(
@@ -87,9 +80,8 @@ fn test_swap_init() {
     let swap_maturity = 5.5;
     let num_swap_payments = 20;
     let swap_rate = 0.03;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let sp_init = hull_white
         .swap_price_t_init(
             curr_rate,
@@ -110,14 +102,8 @@ fn test_swap_init() {
 /// you with, rather than a rate the caller has to invent.
 #[test]
 fn swap_now_variants_match_the_t_form_at_zero() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let r0 = hull_white.short_rate_now().unwrap();
     let delta = 0.25;
     let num_payments = 16;
@@ -180,14 +166,8 @@ fn swap_now_variants_match_the_t_form_at_zero() {
 /// of the two ways of stating the instrument (derived maturity, or anchored payment count).
 #[test]
 fn swaps_are_at_par_at_the_now_forward_rate() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let delta = 0.25;
     for num_payments in [1usize, 4, 12, 20] {
         let forward = hull_white.swap_rate_now(num_payments, delta).unwrap();
@@ -226,14 +206,8 @@ fn swaps_are_at_par_at_the_now_forward_rate() {
 /// zero exactly when the strike is the forward swap rate.
 #[test]
 fn swaption_payer_receiver_parity_at_now() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let delta = 0.25;
     let option_maturity = 2.0;
     let num_payments = 16;

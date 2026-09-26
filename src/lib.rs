@@ -25,16 +25,16 @@
 //! ## Example Usage
 //!
 //! ```rust
-//! use hull_white::HullWhite;
+//! use hull_white::{HullWhite, from_yield};
 //!
-//! // Define yield and forward curves
-//! let yield_curve = |t: f64| 0.05 * t;  // Simple linear yield curve
-//! let forward_curve = |t: f64| t.ln();  // Natural log forward curve
+//! // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose derivative
+//! // f(0,t) = 0.05 + 0.02 t is the instantaneous forward the model drifts to.
+//! let curve = from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
 //!
 //! // Create a Hull-White model with parameters
 //! let a = 0.1;      // Mean reversion speed
 //! let sigma = 0.01; // Volatility parameter
-//! let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+//! let hull_white = HullWhite::new(a, sigma, &curve).unwrap();
 //!
 //! // Price a zero-coupon bond maturing in 2 years
 //! let bond_price = hull_white.bond_price_now(2.0).unwrap();
@@ -44,6 +44,17 @@
 //! let option_price = hull_white.bond_call_now(1.0, 2.0, 0.95).unwrap();
 //! println!("Call option price: {}", option_price);
 //! ```
+//!
+//! ## The curve
+//!
+//! A model is calibrated to one [`YieldCurve`], not to a pair of closures.  The trait's one
+//! required method is the **cumulative** yield `y(t)` (so `P(0,t) = exp(-y(t))`), and the
+//! instantaneous forward `f(0,t) = y'(t)` is derived from it — or supplied in closed form with
+//! [`from_yield_and_forward`] when a finite difference is not wanted.  Because the two halves are
+//! one object, the relation between them is checkable, and [`HullWhite::new`] checks it: a curve
+//! whose forward is not the derivative of its own yield is refused at construction instead of
+//! mispricing quietly.  See [`curves`] for the trait, the tolerance, and why the convention here
+//! is cumulative rather than annualised.
 //!
 //! ## Error handling
 //!
@@ -67,8 +78,8 @@
 //! (the holder never receives them), a payment falling exactly on expiry is cash that folds into
 //! the strike, and only payments strictly after expiry are decomposed.  A schedule with nothing
 //! left after the expiry date is refused, since a bond settled before exercise is not a
-//! deliverable underlying.  See [`jamshidian`](crate::jamshidian) for the convention and the
-//! reasoning behind it.
+//! deliverable underlying.  See the `jamshidian` module (`src/jamshidian.rs`) for the convention and
+//! the reasoning behind it.
 //!
 //! Boundary cases return the economically correct answer instead of an error:
 //!
@@ -101,10 +112,12 @@
 //! instrument is exactly:
 //!
 //! ```rust
-//! # use hull_white::HullWhite;
-//! # let yield_curve = |t: f64| 0.05 * t + 0.01 * t * t;
-//! # let forward_curve = |t: f64| 0.05 + 0.02 * t;
-//! # let hull_white = HullWhite::init(0.2, 0.03, &yield_curve, &forward_curve).unwrap();
+//! # use hull_white::{HullWhite, from_yield_and_forward};
+//! # let curve = from_yield_and_forward(
+//! #     |t: f64| 0.05 * t + 0.01 * t * t,
+//! #     |t: f64| 0.05 + 0.02 * t,
+//! # );
+//! # let hull_white = HullWhite::new(0.2, 0.03, &curve).unwrap();
 //! # let periods = [(1.0, 0.04), (1.25, 0.045), (1.5, 0.05)];
 //! let r0 = hull_white.short_rate_now().unwrap();
 //! let now = hull_white.cap_now(&periods, 0.25).unwrap();
@@ -112,14 +125,13 @@
 //! assert!((now - via_t).abs() < 1e-12, "{now} vs {via_t}");
 //! ```
 //!
-//! `r(0)` is the **instantaneous** forward at the front of the curve, `forward_curve(0.0)` — which
+//! `r(0)` is the **instantaneous** forward at the front of the curve, `curve.forward(0.0)` — which
 //! is the same thing as `phi(0)`, because the volatility term of `phi`,
-//! `sigma^2 (1 - e^{-a t})^2 / (2 a^2)`, vanishes at `t = 0`.  It is *not* `yield_curve(0.0)`:
-//! `yield_curve` is cumulative (`bond_price_now(T) = exp(-yield_curve(T))` is its integral), so
-//! `yield_curve(0.0)` is `0` for any curve worth the name.  A fixture curve like `|t| t.ln()`,
-//! which appears in the older examples in this crate, is `-inf` at `0` and cannot price anything on
-//! the `now` side; pair `|t| 0.05 + 0.02 * t` as the forward curve with `|t| 0.05*t + 0.01*t*t`
-//! as the yield curve instead.
+//! `sigma^2 (1 - e^{-a t})^2 / (2 a^2)`, vanishes at `t = 0`.  It is *not* `curve.zero_yield(0.0)`:
+//! the yield is cumulative (`bond_price_now(T) = exp(-zero_yield(T))` is the integral of the
+//! forward), so `zero_yield(0.0)` is `0` for any curve worth the name.  A curve whose forward is
+//! `-inf` at `0` — `|t| t.ln()`, which appears in the older examples in this crate — cannot price
+//! anything on the `now` side, and says so at [`short_rate_now`](HullWhite::short_rate_now).
 //!
 //! The zero-coupon `_now` prices never look at a rate at all — `bond_price_now` is a closed form off
 //! the yield curve — but a Jamshidian-priced option does, and not by accident: the decomposition
@@ -144,7 +156,7 @@
 //! | Module | What lives there |
 //! |---|---|
 //! | `model` | the [`HullWhite`] struct, calibration entry, `phi_t` / `mu_r` / `variance_r` / [`short_rate_now`](HullWhite::short_rate_now) / `t_forward_bond_vol` |
-//! | `curves` | `a_t` (bond duration), `ct_t` (bond price constant), the Eurodollar variance integral |
+//! | [`curves`] | the [`YieldCurve`] trait and its builders, the construction-time consistency check, plus `a_t` (bond duration), `ct_t` (bond price constant) and the Eurodollar variance integral |
 //! | `schedules` | coupon/payment schedules and the remaining-payment count |
 //! | `bonds` | zero coupon and coupon bond prices, and the coupon-sum kernels they share |
 //! | `jamshidian` | the critical-rate bracket and solve, and the decomposition that consumes them |
@@ -155,7 +167,7 @@
 //! | [`error`] | [`error::HullWhiteError`] |
 //! | `validation` | the input contract every public entry point is checked against |
 //! | `rootfinder` | the bracketed, safeguarded scalar root solver |
-//! | `test_support` | *test / bench only, `#[doc(hidden)]`* — the shared HW-consistent yield and forward curves, and the named calibrations (`flat_5pct`, `steep_curve`, `low_vol`, ...) every test and bench prices off |
+//! | `test_support` | *test / bench only, `#[doc(hidden)]`* — the shared HW-consistent `HwCurve` implementation of [`YieldCurve`], and the named calibrations (`flat_5pct`, `steep_curve`, `low_vol`, ...) every test and bench prices off |
 //! | `mc` | *test only* — the Monte-Carlo harness: per-test seeds, antithetic variates, the one time-grid convention, and the `k * standard_error + discretisation bias` error budget every simulated price is asserted against |
 //!
 //! All public items are re-exported here, so `hull_white::HullWhite`, `hull_white::get_coupon_times`
@@ -182,7 +194,7 @@ mod solver_ab;
 mod validation;
 
 mod bonds;
-mod curves;
+pub mod curves;
 mod jamshidian;
 mod model;
 mod options;
@@ -197,5 +209,10 @@ mod trees;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
+pub use curves::{
+    CURVE_PROBE_TIMES, FORWARD_CONSISTENCY_RELATIVE_TOLERANCE, FORWARD_CONSISTENCY_TOLERANCE,
+    ForwardInconsistency, FromYield, YieldAndForward, YieldCurve, forward_consistency_tolerance,
+    from_yield, from_yield_and_forward, max_forward_inconsistency, validate_curve,
+};
 pub use model::HullWhite;
 pub use schedules::get_coupon_times;

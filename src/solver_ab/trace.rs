@@ -250,13 +250,7 @@ pub(super) fn trace_one_solve() {
         .find(|c| c.label == "flat/c4/K1")
         .expect("fixture case flat/c4/K1");
     let counted = Counted::new(case.curr, case.a, case.b, case.sig);
-    let hw = HullWhite::init(
-        case.a,
-        case.sig,
-        &counted.yield_curve,
-        &counted.forward_curve,
-    )
-    .unwrap();
+    let hw = HullWhite::new(case.a, case.sig, &counted).unwrap();
     let brk = hw
         .critical_rate_bracket(
             case.option_maturity,

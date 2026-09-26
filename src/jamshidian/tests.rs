@@ -29,7 +29,7 @@ fn simpson(f: &dyn Fn(f64) -> f64, a: f64, b: f64, panels: usize) -> f64 {
 /// way with the same variance, and the drift moves by
 /// `sigma^2 * int_t^U exp(-a(U-s)) B(s,U) ds`, which closes to the form below.
 fn expiry_rate_moments(
-    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    hull_white: &HullWhite,
     r_t: f64,
     t: f64,
     option_maturity: f64,
@@ -53,7 +53,7 @@ const NO_KINK: f64 = f64::NAN;
 /// straddling tests hand [`payoff_integral`] an underlying of their own.
 #[allow(clippy::too_many_arguments)] //a test helper with an instrument's whole description
 fn direct_payoff_price(
-    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    hull_white: &HullWhite,
     r_t: f64,
     t: f64,
     option_maturity: f64,
@@ -97,7 +97,7 @@ fn direct_payoff_price(
 /// it) and the put worth exactly nothing.
 #[allow(clippy::too_many_arguments)] //a test helper with an instrument's whole description
 fn payoff_integral(
-    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    hull_white: &HullWhite,
     r_t: f64,
     t: f64,
     option_maturity: f64,
@@ -199,8 +199,8 @@ fn the_forward_measure_drift_reproduces_the_bond_price() {
     let times = [2.5, 3.0, 3.5, 4.0];
     for s in FIXTURES.iter() {
         let name = s.name;
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let (r_t, t, u) = (0.04, 1.0, 2.0);
         let bond = hull_white
             .coupon_bond_price_t(r_t, t, &times, 0.05)
@@ -234,8 +234,8 @@ fn jamshidian_matches_the_direct_payoff_integral() {
     let times = [2.5, 3.0, 3.5, 4.0];
     for s in FIXTURES.iter() {
         let name = s.name;
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         for strike in [0.5f64, 0.8, 0.95, 1.0, 1.05, 1.3, 3.0] {
             for is_call in [true, false] {
                 let priced = if is_call {
@@ -266,8 +266,8 @@ fn a_fine_strike_ladder_around_the_money_matches_the_integral() {
     let times = [2.5, 3.0, 3.5, 4.0];
     for s in FIXTURES.iter() {
         let name = s.name;
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let (r_t, t, u) = (0.04, 1.0, 2.0);
         let underlying = hull_white
             .coupon_bond_price_t(r_t, t, &times, 0.05)
@@ -302,14 +302,8 @@ fn a_negative_coupon_schedule_still_prices() {
     //legs pay one -- and nothing in the decomposition needs the coupon to be positive as
     //long as the weights keep their sign.  The reference checks it independently.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let (r_t, t, u) = (0.04, 1.0, 2.0);
     for coupon_rate in [-0.02f64, -0.005, -0.0001] {
         for strike in [0.5f64, 0.9, 0.95, 1.0, 1.2] {

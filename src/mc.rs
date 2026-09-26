@@ -562,10 +562,7 @@ impl PathState {
 /// Euler step), so the only discretised quantity is the integral.  See the module docs for the
 /// convention and for why the *fixing* lands exactly on the leg boundary.
 pub fn walk(
-    model: &HullWhite<
-        impl Fn(f64) -> f64 + std::marker::Sync,
-        impl Fn(f64) -> f64 + std::marker::Sync,
-    >,
+    model: &HullWhite,
     grid: &Grid,
     start_rate: f64,
     normals: &[f64],
@@ -604,10 +601,7 @@ pub fn walk(
 /// the harness, so a test says what is paid and when and cannot accidentally invent its own
 /// `dt`.
 pub fn run_paths(
-    model: &HullWhite<
-        impl Fn(f64) -> f64 + std::marker::Sync,
-        impl Fn(f64) -> f64 + std::marker::Sync,
-    >,
+    model: &HullWhite,
     rng: StdRng,
     grid: &Grid,
     start_rate: f64,

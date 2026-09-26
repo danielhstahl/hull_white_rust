@@ -299,14 +299,8 @@ fn seeds_are_reproducible_and_slots_are_independent() {
 fn the_walk_lands_on_its_leg_boundaries_and_covers_its_whole_span() {
     use crate::HullWhite;
     use crate::test_support::STEEP_CURVE;
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let model = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let model = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let start = 0.02f64;
     let grid = Grid::for_legs(0.0, &[1.5, 1.75], 100);
     let zeros = vec![0.0; grid.increments()];

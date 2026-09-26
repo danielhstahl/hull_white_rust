@@ -15,9 +15,8 @@ fn payer_swaption() {
     //let swap_tenor = 5.0;
     let num_swap_payments = 20;
     let option_maturity = 1.0;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
@@ -61,9 +60,8 @@ fn receiver_swaption() {
     //let swap_tenor = 5.0;
     let num_swap_payments = 20;
     let option_maturity = 1.0;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
@@ -107,9 +105,8 @@ fn american_payer_swaption() {
     //let swap_tenor = 5.0;
     let num_swap_payments = 20;
     let option_maturity = 1.0;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
@@ -153,9 +150,8 @@ fn american_receiver_swaption() {
     //let swap_tenor = 5.0;
     let num_swap_payments = 20;
     let option_maturity = 1.0;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,

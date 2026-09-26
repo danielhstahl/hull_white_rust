@@ -27,42 +27,83 @@
 //! under `src/`.
 
 use hull_white::error::HullWhiteError;
-use hull_white::{HullWhite, Solution, SolverError, SolverSettings, get_coupon_times};
+use hull_white::{
+    HullWhite, Solution, SolverError, SolverSettings, YieldCurve, from_yield,
+    from_yield_and_forward, get_coupon_times,
+};
 
-type Model = HullWhite<'static, fn(f64) -> f64, fn(f64) -> f64>;
+/// The model type a consumer writes after 0.9.  It has one lifetime and *no* closure type
+/// parameters: `HullWhite<'a>`, not `HullWhite<'a, T, U>`.  A helper that takes a model says
+/// `&HullWhite`, and a `fn` returning one does not have to name the curve it was built from.
+type Model = HullWhite<'static>;
 
-fn yield_curve(t: f64) -> f64 {
-    0.05 * t
+/// A curve whose only primitive is the cumulative yield; the forward is derived from it.
+///
+/// This is the shape a consumer implements when they have a yield curve and no derivative handy.
+struct FlatYield(f64);
+
+impl YieldCurve for FlatYield {
+    fn zero_yield(&self, t: f64) -> f64 {
+        self.0 * t
+    }
 }
-fn forward_curve(t: f64) -> f64 {
-    t.ln()
+
+/// A curve that supplies both halves in closed form — the migration for a consumer who already
+/// had a `(yield, forward)` pair.  Same shape as the crate's `from_yield_and_forward`, written
+/// out here to show that a `struct` is a legal curve and only the one trait has to be satisfied.
+struct SlopedYield;
+
+impl YieldCurve for SlopedYield {
+    fn zero_yield(&self, t: f64) -> f64 {
+        0.05 * t + 0.01 * t * t //the integral of 0.05 + 0.02 * t
+    }
+    fn forward(&self, t: f64) -> f64 {
+        0.05 + 0.02 * t
+    }
 }
 
-/// A curve pair whose *front* is finite.  The `now` side of the crate needs this: `r(0)` is
-/// `forward_curve(0.0)`, and the `t.ln()` shape used above is `-inf` there.  It is also the shape
-/// a real curve has — the instantaneous forward at the front of the curve is a number.
-fn finite_yield_curve(t: f64) -> f64 {
-    0.05 * t + 0.01 * t * t //the integral of 0.05 + 0.02 * t
-}
-fn finite_forward_curve(t: f64) -> f64 {
-    0.05 + 0.02 * t
+/// A consistent curve with no finite front: `y(t) = 0.05 t - 0.02 sqrt(t)`, whose derivative is
+/// `f(0,t) = 0.05 - 0.01 / sqrt(t)`, i.e. `-inf` at `0`.
+///
+/// Self-consistent (the check passes) but with no rate at the front, which is a different failure
+/// and belongs to `short_rate_now`, not to the constructor.  This is the case the crate's older
+/// `|t| t.ln()` examples used to reach by accident — via an *inconsistent* pair, which now
+/// cannot be built at all.
+struct SingularFrontYield;
+
+impl YieldCurve for SingularFrontYield {
+    fn zero_yield(&self, t: f64) -> f64 {
+        0.05 * t - 0.02 * t.sqrt()
+    }
+    fn forward(&self, t: f64) -> f64 {
+        if t > 0.0 {
+            0.05 - 0.01 / t.sqrt()
+        } else {
+            f64::NEG_INFINITY
+        }
+    }
 }
 
-/// `HullWhite<'a, T, U>` *borrows* its curves, so a consumer that wants a `'static` model has to
-/// hand it something with `'static` type.  `fn` items are distinct from `fn` pointers, hence the
-/// statics rather than a pair of locals.
-static YIELD_CURVE: fn(f64) -> f64 = yield_curve;
-static FORWARD_CURVE: fn(f64) -> f64 = forward_curve;
-static FINITE_YIELD_CURVE: fn(f64) -> f64 = finite_yield_curve;
-static FINITE_FORWARD_CURVE: fn(f64) -> f64 = finite_forward_curve;
+/// `HullWhite<'a>` *borrows* its curve, so a consumer that wants a `'static` model has to hand
+/// it something with `'static` type — a static instance of a curve struct rather than a local.
+static FLAT_YIELD: FlatYield = FlatYield(0.05);
+static SLOPED_YIELD: SlopedYield = SlopedYield;
+static SINGULAR_FRONT_YIELD: SingularFrontYield = SingularFrontYield;
 
+/// The plain case: one closure, forward derived.  Finite everywhere including the front.
 fn model() -> Model {
-    HullWhite::init(0.1, 0.01, &YIELD_CURVE, &FORWARD_CURVE).unwrap()
+    HullWhite::new(0.1, 0.01, &FLAT_YIELD).unwrap()
 }
 
-/// The model to price the `now` side with: same shape, curves that are finite at `0`.
+/// The model to price the `now` side with: an upward-sloping curve, closed-form on both halves,
+/// and finite at `0` as `r(0)` requires.
 fn finite_model() -> Model {
-    HullWhite::init(0.1, 0.01, &FINITE_YIELD_CURVE, &FINITE_FORWARD_CURVE).unwrap()
+    HullWhite::new(0.1, 0.01, &SLOPED_YIELD).unwrap()
+}
+
+/// A curve that is consistent but has no finite front, for the `r(0)` failure test.
+fn singular_front_model() -> Model {
+    HullWhite::new(0.1, 0.01, &SINGULAR_FRONT_YIELD).unwrap()
 }
 
 /// A schedule far enough away that nothing has been paid yet at `t = 1.0`.
@@ -85,14 +126,22 @@ fn straddling_coupon_times() -> Vec<f64> {
 
 #[test]
 fn public_types_resolve_from_crate_root() {
-    fn takes_model<T: Fn(f64) -> f64 + Sync, U: Fn(f64) -> f64 + Sync>(_: &HullWhite<'_, T, U>) {}
+    // `HullWhite` takes one lifetime and no closure parameters; a consumer that names the old
+    // `HullWhite<'a, T, U>` no longer compiles, which is the point of the collapse.
+    fn takes_model(_: &HullWhite) {}
     fn takes_error(_: HullWhiteError) {}
     fn takes_solution(_: Solution) {}
     fn takes_solver_error(_: SolverError) {}
     fn takes_settings(_: SolverSettings) {}
 
     let hw = model();
-    takes_model::<fn(f64) -> f64, fn(f64) -> f64>(&hw);
+    takes_model(&hw);
+    //The curve side of the surface resolves from the crate root too.
+    let _: &dyn YieldCurve = &FlatYield(0.05);
+    let derived = from_yield(|t: f64| 0.05 * t);
+    let paired = from_yield_and_forward(|t: f64| 0.05 * t, |_t: f64| 0.05);
+    let _: &dyn YieldCurve = &derived;
+    let _: &dyn YieldCurve = &paired;
     takes_error(HullWhiteError::InvalidInput("shape check".to_string()));
     takes_settings(hw.solver_settings());
     takes_solution(Solution {
@@ -351,10 +400,10 @@ fn short_rate_now_is_public_and_curve_derived() {
     let r0 = hw.short_rate_now().unwrap();
     assert!(r0.is_finite(), "r(0) = {r0}");
     //The instantaneous forward at the front of the curve, not the cumulative yield there.
-    assert!((r0 - finite_forward_curve(0.0)).abs() < 1e-12, "{r0}");
+    assert!((r0 - SLOPED_YIELD.forward(0.0)).abs() < 1e-12, "{r0}");
     assert!((r0 - 0.05).abs() < 1e-12, "{r0}");
     assert!(
-        (r0 - finite_yield_curve(0.0)).abs() > 1e-3,
+        (r0 - SLOPED_YIELD.zero_yield(0.0)).abs() > 1e-3,
         "r(0) must not be read off the cumulative yield"
     );
 }
@@ -548,7 +597,7 @@ fn cap_and_floor_aggregate_periods() {
 /// is `-inf` at `0`, so nothing on the state-dependent `now` side can be priced with it.
 #[test]
 fn an_infinite_front_curve_reports_r0_as_an_error() {
-    let hw = model();
+    let hw = singular_front_model();
     assert!(matches!(
         hw.short_rate_now(),
         Err(HullWhiteError::NumericalError(_))

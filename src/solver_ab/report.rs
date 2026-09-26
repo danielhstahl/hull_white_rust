@@ -215,13 +215,7 @@ pub(super) fn compare(
     reference_settings: SolverSettings,
 ) -> Compared {
     let counted = Counted::new(case.curr, case.a, case.b, case.sig);
-    let hw = HullWhite::init(
-        case.a,
-        case.sig,
-        &counted.yield_curve,
-        &counted.forward_curve,
-    )
-    .unwrap();
+    let hw = HullWhite::new(case.a, case.sig, &counted).unwrap();
     let reference = run_variant(
         &hw,
         &counted.calls,

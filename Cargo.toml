@@ -1,6 +1,6 @@
 [package]
 name = "hull_white"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Daniel Stahl <danstahl1138@gmail.com>"]
 homepage = "https://github.com/danielhstahl/hull_white_rust"
 repository = "https://github.com/danielhstahl/hull_white_rust"

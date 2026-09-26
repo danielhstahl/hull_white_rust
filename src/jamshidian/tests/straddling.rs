@@ -12,7 +12,7 @@
 //! two references share no code with each other or with the pricer.
 
 use crate::HullWhite;
-use crate::test_support::{STEEP_CURVE, hw_curves};
+use crate::test_support::{STEEP_CURVE, hw_curve};
 
 use super::{FIXTURES, payoff_integral};
 
@@ -42,7 +42,7 @@ fn tail_only(coupon_times: &[f64], expiry: f64) -> &[f64] {
 /// schedule by hand: nothing before expiry, cash (`P(u, u) = 1`) on it, the discount bond on each
 /// later payment.
 fn deliverable_at_expiry(
-    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    hull_white: &HullWhite,
     expiry: f64,
     coupon_times: &[f64],
     coupon_rate: f64,
@@ -73,7 +73,7 @@ fn deliverable_at_expiry(
 /// exactly as `crate::trees` does.
 #[allow(clippy::too_many_arguments)] //a pricer's instrument plus the tree's resolution
 fn tree_option_price(
-    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    hull_white: &HullWhite,
     r_t: f64,
     t: f64,
     option_maturity: f64,
@@ -117,7 +117,7 @@ fn tree_option_price(
 }
 
 fn assert_matches_payoff_integral(
-    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    hull_white: &HullWhite,
     coupon_times: &[f64],
     coupon_rate: f64,
     strike: f64,
@@ -149,8 +149,8 @@ fn a_straddling_schedule_matches_the_direct_payoff_integral() {
     //quadrature of the payoff the holder actually has.
     let strikes = [0.3f64, 0.7, 0.95, 1.0, 1.05, 1.3, 2.0];
     for s in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         for schedule in STRADDLING.iter() {
             for &strike in strikes.iter() {
                 for is_call in [true, false] {
@@ -173,14 +173,8 @@ fn a_straddling_schedule_with_a_negative_coupon_rate_matches_the_integral() {
     //the split non-trivial: the dropped payments were *negative* cash, the payment on the expiry
     //date arrives as a strike increase, and the par still has to land on the schedule's final
     //payment rather than on whatever happens to be the residual's last one.
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     for schedule in STRADDLING.iter() {
         for coupon_rate in [-0.02f64, -0.005, -0.0001] {
             for strike in [0.5f64, 0.9, 0.95, 1.0, 1.2] {
@@ -203,8 +197,8 @@ fn dropping_the_pre_expiry_coupons_cannot_change_the_price() {
     //Everything strictly before expiry is worth nothing on the expiry date, so dropping it is a
     //no-op: the full schedule and the post-expiry tail are the same instrument.
     for s in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         for schedule in STRADDLING.iter() {
             let tail = tail_only(schedule, U);
             if tail == *schedule {
@@ -239,8 +233,8 @@ fn a_coupon_on_the_expiry_date_is_a_strike_reduction() {
     //so pricing the schedule that carries it must equal pricing the residual against a strike
     //shrunk by that cash: (cash + R - K)^+ == (R - (K - cash))^+.
     for s in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let residual = &[2.25, 2.5, 3.0][..];
         let carrying_cash = &[2.0, 2.25, 2.5, 3.0][..];
         for &strike in [0.7f64, 0.95, 1.0, 1.3].iter() {
@@ -268,8 +262,8 @@ fn a_strike_at_or_below_the_expiry_cash_is_exercised_in_every_state() {
     //at a strike at or below it the call is parity and the put is nothing, with nothing left to
     //solve for.  The quadrature checks the same thing from the payoff.
     for s in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let carrying_cash = &[2.0, 2.25, 2.5, 3.0][..];
         //The floor is one coupon here, and the deliverable really is above it at every rate the
         //option can reach: sample the whole state space the quadrature integrates over.
@@ -318,8 +312,8 @@ fn a_straddling_schedule_agrees_with_a_short_rate_tree() {
     //the tolerance and the tree's own convergence is asserted separately.
     let strikes = [0.7f64, 0.95, 1.0, 1.3];
     for s in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = s.curves();
-        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = s.curve();
+        let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         for schedule in STRADDLING.iter() {
             let deliverable =
                 |rate: f64| deliverable_at_expiry(&hull_white, U, schedule, COUPON_RATE, rate);
@@ -397,8 +391,8 @@ fn an_all_post_expiry_schedule_is_untouched_by_the_convention() {
         (0.03, 0.40, 0.045, 0.005, 1.3, 0.0, 0.14294295284414782),
     ];
     for &(curr, a, b, sigma, strike, call_expected, put_expected) in golden.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+        let curve = hw_curve(curr, a, b, sigma);
+        let hull_white = HullWhite::new(a, sigma, &curve).unwrap();
         let call = hull_white
             .coupon_bond_call_t(R_T, 1.0, 1.5, &times, COUPON_RATE, strike)
             .unwrap();

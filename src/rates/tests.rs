@@ -30,14 +30,8 @@ const EURODOLLAR_SEED: u8 = 12;
 /// put, and the `t` form run at `(r(0), 0)`.
 #[test]
 fn floorlet_now_is_the_t_form_at_zero() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let r0 = hull_white.short_rate_now().unwrap();
     let delta = 0.25;
     for option_maturity in [0.25, 1.0, 1.5, 5.0] {
@@ -67,14 +61,8 @@ fn floorlet_now_is_the_t_form_at_zero() {
 /// which is `delta * (forward Libor - K)` discounted, and vanishes when the strike is the forward.
 #[test]
 fn cap_floor_parity_is_the_forward_leg() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let delta = 0.25;
     for (t, option_maturity) in [(0.0, 1.0), (0.5, 2.0), (1.0, 1.25), (2.0, 7.0)] {
         for strike in [-0.02, 0.0, 0.02, 0.05, 0.20] {
@@ -120,14 +108,8 @@ fn cap_floor_parity_is_the_forward_leg() {
 /// the two sides is the same one.
 #[test]
 fn floor_and_cap_agree_at_the_forward_strike() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let delta = 0.25;
     for option_maturity in [1.0, 2.5, 4.0] {
         let forward = hull_white
@@ -166,14 +148,8 @@ fn floor_and_cap_agree_at_the_forward_strike() {
 /// call rather than in a caller-managed loop.
 #[test]
 fn cap_and_floor_are_the_sum_of_their_periods() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let delta = 0.25;
     let strikes = [0.02, 0.03, 0.04, 0.05, 0.06];
     let periods: Vec<(f64, f64)> = (1..=20)
@@ -263,14 +239,8 @@ fn cap_and_floor_are_the_sum_of_their_periods() {
 /// An empty schedule is not a free cap, and one bad period is not a dropped leg.
 #[test]
 fn cap_and_floor_schedule_errors() {
-    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
-    let hull_white = HullWhite::init(
-        STEEP_CURVE.a,
-        STEEP_CURVE.sigma,
-        &yield_curve,
-        &forward_curve,
-    )
-    .unwrap();
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
     let delta = STEEP_CURVE.delta;
     for empty in [
         hull_white.cap_now(&[], delta),
@@ -319,10 +289,9 @@ fn compare_caplet() {
     let future_time = 0.0;
     let option_maturity = 1.5;
     let strike = 0.02;
-    let (yield_curve, forward_curve) = fixture.curves();
+    let curve = fixture.curve();
     let delta = fixture.delta;
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let caplet_n = hull_white
         .caplet_now(option_maturity, delta, strike)
         .unwrap();
@@ -338,10 +307,9 @@ fn compare_libor() {
     let curr_rate = fixture.curr_rate;
     let future_time = 0.0;
     let maturity = 1.5;
-    let (yield_curve, forward_curve) = fixture.curves();
+    let curve = fixture.curve();
     let delta = fixture.delta;
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let libor_n = hull_white.forward_libor_rate_now(maturity, delta).unwrap();
     let libor_t = hull_white
         .forward_libor_rate_t(curr_rate, future_time, maturity, delta)
@@ -405,11 +373,7 @@ impl ArrearsOption {
     /// This path's discounted payoff: the fixing read off the rate *at* the expiry date, the
     /// period's simple-rate payoff, discounted by this path's own short-rate integral to the
     /// payment date.
-    fn payoff(
-        &self,
-        hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
-        state: &mc::PathState,
-    ) -> f64 {
+    fn payoff(&self, hull_white: &HullWhite, state: &mc::PathState) -> f64 {
         //The rate at the end of the first leg is the rate at the fixing date — not one step past
         //it, which is what the old `dt = span / (n - 1)` convention did.
         let fixing_rate = state.rate_at_end_of_leg(0);
@@ -425,10 +389,7 @@ impl ArrearsOption {
     }
 
     /// The closed form this estimator is checked against.
-    fn analytic(
-        &self,
-        hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
-    ) -> f64 {
+    fn analytic(&self, hull_white: &HullWhite) -> f64 {
         if self.cap {
             hull_white
                 .caplet_now(self.option_maturity, self.delta, self.strike)
@@ -442,12 +403,7 @@ impl ArrearsOption {
 }
 
 /// Simulate the arrears option on `grid` with antithetic pairs.
-fn simulate(
-    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
-    option: &ArrearsOption,
-    grid: &Grid,
-    pairs: usize,
-) -> Estimate {
+fn simulate(hull_white: &HullWhite, option: &ArrearsOption, grid: &Grid, pairs: usize) -> Estimate {
     mc::run_paths(
         hull_white,
         mc::rng_for(SIMPLE_RATE_OPTION_SEED),
@@ -463,7 +419,7 @@ fn simulate(
 /// stdout, which is what `--nocapture` is for.
 fn assert_arrears_option_within_budget(
     label: &str,
-    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    hull_white: &HullWhite,
     option: &ArrearsOption,
 ) -> Estimate {
     let scale = mc::scale();
@@ -491,9 +447,8 @@ fn assert_arrears_option_within_budget(
 #[test]
 fn monte_carlo_caplet_matches_the_closed_form() {
     let fixture = BASELINE;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     assert_arrears_option_within_budget(
         "caplet(T=1.5, K=0.02) simulated arrears, antithetic, fine dt = 1/steps_per_year",
         &hull_white,
@@ -514,9 +469,8 @@ fn monte_carlo_caplet_matches_the_closed_form() {
 #[test]
 fn monte_carlo_floorlet_matches_the_closed_form() {
     let fixture = BASELINE;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let strike = 0.05;
     assert_arrears_option_within_budget(
         "floorlet(T=1.5, K=0.05) simulated arrears, antithetic, fine dt = 1/steps_per_year",
@@ -552,9 +506,8 @@ fn monte_carlo_floorlet_matches_the_closed_form() {
 #[test]
 fn monte_carlo_euro_dollar_future_matches_the_closed_form() {
     let fixture = BASELINE;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let curve = fixture.curve();
+    let hull_white = HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let option_maturity = 1.5;
     let delta = fixture.delta;
     let mu = hull_white

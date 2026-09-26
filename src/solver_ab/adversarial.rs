@@ -31,13 +31,7 @@ pub(super) fn old_solver_stress() {
     let (mut old_iters_max, mut old_iters_case) = (0u32, String::new());
     for case in &cases {
         let counted = Counted::new(case.curr, case.a, case.b, case.sig);
-        let hw = HullWhite::init(
-            case.a,
-            case.sig,
-            &counted.yield_curve,
-            &counted.forward_curve,
-        )
-        .unwrap();
+        let hw = HullWhite::new(case.a, case.sig, &counted).unwrap();
         counted.calls.store(0, Ordering::Relaxed);
         let reference = run_new(
             &hw,

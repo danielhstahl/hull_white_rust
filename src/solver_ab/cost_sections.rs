@@ -41,13 +41,7 @@ pub(super) fn solver_ab_cost() {
     let mut totals = Totals::default();
     for case in &cases {
         let counted = Counted::new(case.curr, case.a, case.b, case.sig);
-        let hw = HullWhite::init(
-            case.a,
-            case.sig,
-            &counted.yield_curve,
-            &counted.forward_curve,
-        )
-        .unwrap();
+        let hw = HullWhite::new(case.a, case.sig, &counted).unwrap();
         //Drop init's curve traffic out of the count.
         counted.calls.store(0, Ordering::Relaxed);
 
@@ -161,13 +155,7 @@ pub(super) fn solver_ab_cost() {
         .filter(|c| matches!(c.strike, 0.5 | 0.95 | 1.0 | 3.0))
     {
         let counted = Counted::new(case.curr, case.a, case.b, case.sig);
-        let hw = HullWhite::init(
-            case.a,
-            case.sig,
-            &counted.yield_curve,
-            &counted.forward_curve,
-        )
-        .unwrap();
+        let hw = HullWhite::new(case.a, case.sig, &counted).unwrap();
         let mut new_times = Vec::with_capacity(reps);
         let mut old_times = Vec::with_capacity(reps);
         let mut new_calls = Vec::with_capacity(reps);
@@ -226,13 +214,7 @@ pub(super) fn solver_ab_cost() {
         .collect();
     for case in &d_cases {
         let counted = Counted::new(case.curr, case.a, case.b, case.sig);
-        let hw = HullWhite::init(
-            case.a,
-            case.sig,
-            &counted.yield_curve,
-            &counted.forward_curve,
-        )
-        .unwrap();
+        let hw = HullWhite::new(case.a, case.sig, &counted).unwrap();
         let reference = run_variant(
             &hw,
             &counted.calls,

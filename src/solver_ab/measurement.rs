@@ -1,7 +1,7 @@
 //! The measurement plumbing: the counted objective and derivative the harness solves, and the
 //! `Run` record every solver variant is normalised into.
 //!
-//! Every zero-coupon leg price funnels through the yield and forward curves, so a count of curve
+//! Every zero-coupon leg price funnels through the curve's yield and forward accessors, so a count of curve
 //! calls (`Counted`) is a measure of model work no solver can game; the `f` / `df` counts are the
 //! solver's own asks.  `run_new`, `run_old` and `run_variant` build the *same* closures and differ
 //! only in the solver they hand them to -- the only independent variable is the solve.
@@ -22,9 +22,7 @@ pub(super) type SolveFn<'a> = &'a dyn Fn(
     &SolverSettings,
 ) -> Result<rootfinder::Solution, rootfinder::SolverError>;
 
-pub(super) type Curve = Box<dyn Fn(f64) -> f64 + Sync>;
-
-pub(super) type Model<'h> = HullWhite<'h, Curve, Curve>;
+pub(super) type Model<'h> = HullWhite<'h>;
 
 /// One solve's worth of measurements.
 pub(super) struct Run {

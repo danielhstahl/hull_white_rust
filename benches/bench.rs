@@ -10,10 +10,8 @@ fn bench_bond_t(bench: &mut Bencher) {
     let curr_rate = fixture.curr_rate;
     let future_time = 0.0;
     let maturity = 1.5;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        hull_white::HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve)
-            .unwrap();
+    let curve = fixture.curve();
+    let hull_white = hull_white::HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     bench.iter(|| {
         hull_white
             .bond_price_t(curr_rate, future_time, maturity)
@@ -25,10 +23,8 @@ fn bench_bond_t(bench: &mut Bencher) {
 fn bench_bond_now(bench: &mut Bencher) {
     let fixture = BASELINE;
     let maturity = 1.5;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        hull_white::HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve)
-            .unwrap();
+    let curve = fixture.curve();
+    let hull_white = hull_white::HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     bench.iter(|| hull_white.bond_price_now(maturity).unwrap())
 }
 
@@ -39,10 +35,8 @@ fn bench_coupon_bond_t(bench: &mut Bencher) {
     let delta = fixture.delta;
     let future_time = 0.0;
     let coupon_rate = 0.05 * delta;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        hull_white::HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve)
-            .unwrap();
+    let curve = fixture.curve();
+    let hull_white = hull_white::HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
 
     bench.iter(|| {
         let coupon_times = hull_white::get_coupon_times(5, future_time, delta).unwrap();
@@ -58,10 +52,8 @@ fn bench_coupon_bond_now(bench: &mut Bencher) {
     let delta = fixture.delta;
     let future_time = 0.0;
     let coupon_rate = 0.05 * delta;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        hull_white::HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve)
-            .unwrap();
+    let curve = fixture.curve();
+    let hull_white = hull_white::HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
 
     bench.iter(|| {
         let coupon_times = hull_white::get_coupon_times(5, future_time, delta).unwrap();
@@ -82,10 +74,8 @@ fn bench_swap_rate(bench: &mut Bencher) {
     let option_maturity = 1.0;
     let swap_tenor = 5.0;
     let num_swap_payments = (swap_tenor / delta) as usize; //20 quarterly payments
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        hull_white::HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve)
-            .unwrap();
+    let curve = fixture.curve();
+    let hull_white = hull_white::HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     bench.iter(|| {
         hull_white
             .forward_swap_rate_t(
@@ -112,10 +102,8 @@ fn bench_swaption_european(bench: &mut Bencher) {
     let option_maturity = 1.0;
     let swap_tenor = 5.0;
     let num_swap_payments = (swap_tenor / delta) as usize; //20 quarterly payments
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        hull_white::HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve)
-            .unwrap();
+    let curve = fixture.curve();
+    let hull_white = hull_white::HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
@@ -164,10 +152,8 @@ fn bench_swaption_american(bench: &mut Bencher) {
     let option_maturity = 1.0;
     let swap_tenor = 5.0;
     let num_swap_payments = (swap_tenor / delta) as usize; //20 quarterly payments
-    let (yield_curve, forward_curve) = fixture.curves();
-    let hull_white =
-        hull_white::HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve)
-            .unwrap();
+    let curve = fixture.curve();
+    let hull_white = hull_white::HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
