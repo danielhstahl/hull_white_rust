@@ -44,19 +44,13 @@ fn expiry_rate_moments(
     (risk_neutral_mean - numeraire_drift, variance.sqrt())
 }
 
-/// Prices the payoff directly by integrating over the expiry-date distribution of the short
-/// rate, as an independent check on the Jamshidian machinery.
-///
-/// ```text
-/// price = P(t,U) * E^U[(P_c(mu + sd*Z) - strike)^+]
-/// ```
-///
-/// Nothing in here uses Jamshidian's decomposition, the analytic bracket or the root solver,
-/// so agreement pins those down rather than echoing them.  The payoff kinks where
-/// `P_c(r) = strike`; that kink is found by this test's own plain bisection and each side is
-/// integrated separately, so the kink is never interior to a panel.  `Z` is truncated at
-/// +/-12 sigma, where `phi` underflows, putting the tail error far below any price worth
-/// quoting.
+/// Kink marker for a payoff whose underlying never reaches the strike.
+const NO_KINK: f64 = f64::NAN;
+
+/// Prices an option on a coupon bond by integrating its payoff directly over the expiry-date
+/// distribution of the short rate, with the *whole* coupon bond valued at expiry as the
+/// underlying.  Used by the fixtures whose schedules lie entirely after the expiry date; the
+/// straddling tests hand [`payoff_integral`] an underlying of their own.
 #[allow(clippy::too_many_arguments)] //a test helper with an instrument's whole description
 fn direct_payoff_price(
     hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
@@ -68,39 +62,93 @@ fn direct_payoff_price(
     strike: f64,
     is_call: bool,
 ) -> f64 {
-    let coupon_bond_at = |rate: f64| {
+    let underlying = |rate: f64| {
         hull_white
             .coupon_bond_price_t(rate, option_maturity, coupon_times, coupon_rate)
             .unwrap()
     };
+    payoff_integral(
+        hull_white,
+        r_t,
+        t,
+        option_maturity,
+        &underlying,
+        strike,
+        is_call,
+    )
+}
+
+/// Prices an option by integrating its payoff directly over the expiry-date distribution of the
+/// short rate, as an independent check on the Jamshidian machinery.
+///
+/// ```text
+/// price = P(t,U) * E^U[(underlying(r_U) - strike)^+]
+/// ```
+///
+/// Nothing in here uses Jamshidian's decomposition, the analytic bracket or the root solver, so
+/// agreement pins those down rather than echoing them.  The payoff kinks where
+/// `underlying(r) = strike`; that kink is found by this test's own plain bisection and each side
+/// is integrated separately, so the kink is never interior to a panel.  `Z` is truncated at
+/// +/-12 sigma, where `phi` underflows, putting the tail error far below any price worth quoting.
+///
+/// An underlying that never reaches the strike needs no kink: a deliverable carrying cash settled
+/// on the expiry date has a floor no rate can take away, so a strike at or below it leaves the call
+/// in the money in every state (integrate the whole window and let the payoff's own `max` sort
+/// it) and the put worth exactly nothing.
+#[allow(clippy::too_many_arguments)] //a test helper with an instrument's whole description
+fn payoff_integral(
+    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    r_t: f64,
+    t: f64,
+    option_maturity: f64,
+    underlying_at_expiry: &dyn Fn(f64) -> f64,
+    strike: f64,
+    is_call: bool,
+) -> f64 {
     let (mean, sd) = expiry_rate_moments(hull_white, r_t, t, option_maturity);
     assert!(
         sd > 0.0,
         "the reference needs a non-degenerate expiry distribution"
     );
 
-    //Kink: P_c(r) = strike.  P_c falls strictly with the rate, so widen until the ends
-    //disagree and then halve.
-    let g = |rate: f64| coupon_bond_at(rate) - strike;
+    //Kink: underlying = strike.  The underlying falls strictly with the rate, so widen until the
+    //two ends disagree.  A strike the underlying never reaches -- a deliverable floored by cash
+    //settled on the expiry date, say -- braces nothing no matter how far the ends go, so widening
+    //stops at a finite rate and the sign of `g` at that point says which way the payoff lies.
+    let g = |rate: f64| underlying_at_expiry(rate) - strike;
     let mut lo = mean - sd;
     let mut hi = mean + sd;
-    while g(lo) < 0.0 {
-        lo = mean - 2.0 * (mean - lo);
-        assert!(lo > -1e6, "no kink found below the mean");
-    }
-    while g(hi) > 0.0 {
-        hi = mean + 2.0 * (hi - mean);
-        assert!(hi < 1e6, "no kink found above the mean");
-    }
-    for _ in 0..200 {
-        let mid = 0.5 * (lo + hi);
-        if g(mid) > 0.0 {
-            lo = mid;
-        } else {
-            hi = mid;
+    let mut braced = false;
+    while lo > -1e6 && hi < 1e6 {
+        if g(lo) >= 0.0 && g(hi) <= 0.0 && g(lo) != g(hi) {
+            braced = true;
+            break;
+        }
+        if g(lo) < 0.0 {
+            lo = mean - 2.0 * (mean - lo);
+        }
+        if g(hi) > 0.0 {
+            hi = mean + 2.0 * (hi - mean);
         }
     }
-    let kink_z = (0.5 * (lo + hi) - mean) / sd;
+    //Which way the payoff lies when there is no kink: `g > 0` at both ends of the widened search
+    //means the underlying stays above the strike, so a call is exercised in every state and a put
+    //in none; `g < 0` is the mirror image.  Read before the bisection narrows the ends down to the
+    //kink itself.
+    let above = g(lo) > 0.0;
+    let kink = if braced {
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if g(mid) > 0.0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        (0.5 * (lo + hi) - mean) / sd
+    } else {
+        NO_KINK
+    };
 
     let pdf = |z: f64| (-0.5 * z * z).exp() / (2.0 * std::f64::consts::PI).sqrt();
     let integrand = |z: f64| {
@@ -109,7 +157,7 @@ fn direct_payoff_price(
             //Stops inf * 0 = NaN in a deep tail where the payoff itself overflows.
             return 0.0;
         }
-        let value = coupon_bond_at(mean + sd * z);
+        let value = underlying_at_expiry(mean + sd * z);
         let payoff = if is_call {
             (value - strike).max(0.0)
         } else {
@@ -117,11 +165,13 @@ fn direct_payoff_price(
         };
         payoff * density
     };
-    //A call is in the money below the kink, a put above it.
-    let (a, b) = if is_call {
-        (-12.0, kink_z.min(12.0))
-    } else {
-        (kink_z.max(-12.0), 12.0)
+    //A call is in the money below the kink, a put above it.  With no kink one side of the payoff
+    //is live across the whole state space and the other is worth nothing.
+    let (a, b) = match (kink.is_nan(), above, is_call) {
+        (true, true, true) | (true, false, false) => (-12.0, 12.0),
+        (true, _, _) => return 0.0,
+        (false, _, true) => (-12.0, kink.min(12.0)),
+        (false, _, false) => (kink.max(-12.0), 12.0),
     };
     if a >= b {
         return 0.0;
@@ -288,4 +338,5 @@ fn a_negative_coupon_schedule_still_prices() {
 }
 
 mod solver_behaviour;
+mod straddling;
 mod strikes;

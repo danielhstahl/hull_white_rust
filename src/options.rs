@@ -10,6 +10,7 @@
 
 use crate::HullWhite;
 use crate::error::HullWhiteError;
+use crate::jamshidian::Side;
 use crate::validation;
 
 impl<'a, T, U> HullWhite<'a, T, U>
@@ -100,6 +101,23 @@ where
     }
     /// Returns price of a call option on a coupon bond at some future time
     ///
+    /// `coupon_times` is the whole payment schedule of the bond (the final entry is the maturity
+    /// payment) and it may straddle the option's expiry: the underlying of a coupon-bond option is
+    /// the bond *as it stands on the expiry date*, so
+    ///
+    /// * coupons paid **strictly before** `option_maturity` are not part of the underlying and are
+    ///   dropped -- the option holder never receives them;
+    /// * a coupon falling **exactly on** `option_maturity` is cash the holder does receive on the
+    ///   expiry date, and is subtracted from the strike (it is a constant at expiry, not a
+    ///   function of the rate);
+    /// * coupons **strictly after** `option_maturity` are the residual bond that gets decomposed.
+    ///
+    /// A schedule with nothing strictly after `option_maturity` is refused: the bond is settled
+    /// before the option can be exercised, so there is nothing to deliver.  Dropping the
+    /// pre-expiry coupons cannot change the price, so the full schedule and the post-expiry tail
+    /// alone price identically (see the example).  The full reasoning is in
+    /// [`crate::jamshidian`].
+    ///
     /// # Examples
     ///
     /// ```
@@ -108,13 +126,24 @@ where
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let t = 1.0; //time from "now" (0) to start valuing the bond
     /// let option_maturity = 1.5;
-    /// let coupon_times = vec![1.75, 2.0, 2.25, 2.5, 2.75, 3.0];
+    /// //a 2.5y bond with coupons before, on, and after the 1.5y expiry
+    /// let coupon_times = vec![1.25, 1.5, 1.75, 2.0, 2.25, 2.5];
     /// let coupon_rate = 0.05;
     /// let strike = 1.0;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
     /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
-    /// let bond_call = hull_white.coupon_bond_call_t(r_t, t, option_maturity, &coupon_times, coupon_rate, strike).unwrap();
+    /// let call = hull_white.coupon_bond_call_t(r_t, t, option_maturity, &coupon_times, coupon_rate, strike).unwrap();
+    /// //Dropping the one coupon paid strictly before expiry (1.25) cannot change the price: it is
+    /// //not part of the bond the holder gets on the expiry date.
+    /// let tail = vec![1.5, 1.75, 2.0, 2.25, 2.5];
+    /// let dropped = hull_white.coupon_bond_call_t(r_t, t, option_maturity, &tail, coupon_rate, strike).unwrap();
+    /// assert_eq!(call, dropped);
+    /// //The coupon paid *on* the expiry date is cash worth `coupon_rate` there, so on the residual
+    /// //bond it shows up as a strike reduction.
+    /// let residual = vec![1.75, 2.0, 2.25, 2.5];
+    /// let folded = hull_white.coupon_bond_call_t(r_t, t, option_maturity, &residual, coupon_rate, strike - coupon_rate).unwrap();
+    /// assert_eq!(call, folded);
     /// ```
     pub fn coupon_bond_call_t(
         &self,
@@ -132,6 +161,7 @@ where
             coupon_times,
             coupon_rate,
             strike,
+            Side::Call,
             &|r_t: f64, t: f64, option_maturity: f64, bond_maturity: f64, strike: f64| {
                 self.bond_call_t(r_t, t, option_maturity, bond_maturity, strike)
             },
@@ -220,6 +250,13 @@ where
     }
     /// Returns price of a put option on a coupon bond at some future time
     ///
+    /// Same schedule convention as [`HullWhite::coupon_bond_call_t`]: the underlying is the bond
+    /// *as it stands on the option's expiry date*.  Coupons strictly before `option_maturity` are
+    /// dropped (the holder never receives them), a coupon falling exactly on `option_maturity` is
+    /// cash on the expiry date and is subtracted from the strike, and only coupons strictly after
+    /// `option_maturity` are decomposed.  A schedule with nothing strictly after the expiry is
+    /// refused.  See [`crate::jamshidian`] for the reasoning.
+    ///
     /// # Examples
     ///
     /// ```
@@ -228,13 +265,18 @@ where
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let t = 1.0; //time from "now" (0) to start valuing the bond
     /// let option_maturity = 1.5;
-    /// let coupon_times = vec![1.75, 2.0, 2.25, 2.5, 2.75, 3.0];
+    /// //a 2.5y bond with coupons before, on, and after the 1.5y expiry
+    /// let coupon_times = vec![1.25, 1.5, 1.75, 2.0, 2.25, 2.5];
     /// let coupon_rate = 0.05;
     /// let strike = 1.0;
     /// let yield_curve = |t:f64|0.05*t; //yield curve returns the "raw" yield (not divided by maturity)
     /// let forward_curve = |t:f64|t.ln();
     /// let hull_white = hull_white::HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
     /// let bond_put = hull_white.coupon_bond_put_t(r_t, t, option_maturity, &coupon_times, coupon_rate, strike).unwrap();
+    /// //The pre-expiry coupon is not part of the underlying: dropping it leaves the price alone.
+    /// let tail = vec![1.5, 1.75, 2.0, 2.25, 2.5];
+    /// let dropped = hull_white.coupon_bond_put_t(r_t, t, option_maturity, &tail, coupon_rate, strike).unwrap();
+    /// assert_eq!(bond_put, dropped);
     /// ```
     pub fn coupon_bond_put_t(
         &self,
@@ -252,6 +294,7 @@ where
             coupon_times,
             coupon_rate,
             strike,
+            Side::Put,
             &|r_t: f64, t: f64, option_maturity: f64, bond_maturity: f64, strike: f64| {
                 self.bond_put_t(r_t, t, option_maturity, bond_maturity, strike)
             },

@@ -48,10 +48,15 @@ fn coupon_times() -> Vec<f64> {
     get_coupon_times(4, 1.0, 0.25).unwrap()
 }
 
-/// A schedule whose first coupon is strictly after the 1.5y expiry, as an option on a coupon bond
-/// requires: a coupon paid before expiry is not part of the exercise decision.
+/// A schedule starting strictly after the 1.5y expiry, so an option on it has nothing dropped.
 fn post_expiry_coupon_times() -> Vec<f64> {
     get_coupon_times(4, 1.5, 0.25).unwrap()
+}
+
+/// The same bond as written at `t = 1.0`: coupons paid before the 1.5y expiry and one exactly on
+/// it, so the deliverable underlying is the residual that starts at 1.75.
+fn straddling_coupon_times() -> Vec<f64> {
+    get_coupon_times(6, 1.0, 0.25).unwrap()
 }
 
 // ---- type-level surface -------------------------------------------------------------
@@ -198,6 +203,29 @@ fn coupon_bond_option_calls() {
     // better call, a richer strike is a better put.
     assert!(call(0.85) > call(0.95), "call decreasing in strike");
     assert!(put(1.2) > put(1.1), "put increasing in strike");
+
+    // A bond's schedule may straddle the expiry: the underlying is the bond as it stands on the
+    // expiry date, so the two coupons paid before it (1.25, 1.5 ...) drop out and the coupon
+    // falling exactly on it arrives as a reduction of the strike.
+    let straddle_call = |k: f64| {
+        hw.coupon_bond_call_t(0.05, 1.0, 1.5, &straddling_coupon_times(), 0.05, k)
+            .unwrap()
+    };
+    let residual_call = |k: f64| {
+        hw.coupon_bond_call_t(0.05, 1.0, 1.5, &post_expiry_coupon_times(), 0.05, k)
+            .unwrap()
+    };
+    assert!(straddle_call(0.95) > 0.0, "straddling call");
+    assert_eq!(
+        straddle_call(1.0),
+        residual_call(1.0 - 0.05),
+        "the coupon on the expiry date is a strike reduction on the residual bond"
+    );
+    // A bond with nothing left to deliver after the expiry date is not an underlying.
+    assert!(matches!(
+        hw.coupon_bond_call_t(0.05, 1.0, 3.0, &[1.25, 1.5, 2.5], 0.05, 1.0),
+        Err(HullWhiteError::InvalidInput(_))
+    ));
     // Jamshidian is exact, so the decomposition has to agree with the plain call/put relation
     // C - P = P_c(r) - K on the same underlying (checked to model precision by the module tests;
     // here only that both legs stay finite and non-negative).

@@ -208,17 +208,42 @@ fn bond_option_needs_the_underlying_to_outlive_the_option() {
 }
 
 #[test]
-fn jamshidian_rejects_coupons_paid_before_option_expiry() {
+fn a_bond_settled_by_its_option_expiry_is_invalid_input() {
     yvf_setup!(hull_white);
-    //The underlying of the decomposed option is the bond *at* expiry.  A coupon paid before
-    //expiry is not part of that bond, so pricing it would value a leg that does not exist.
+    //The underlying of the decomposed option is the bond *at* expiry, so a schedule that straddles
+    //expiry is fine -- but a bond with nothing left to deliver after the expiry date is not an
+    //underlying at all.
     expect_invalid(
-        hull_white.coupon_bond_call_t(0.05, 1.0, 1.5, &[1.25, 1.75, 2.0], 0.05, 1.0),
-        "coupon_times[0]",
+        hull_white.coupon_bond_call_t(0.05, 1.0, 2.0, &[1.25, 1.5, 1.75], 0.05, 1.0),
+        "no payment strictly after",
+    );
+    //maturing exactly on the expiry date is settled by it too: the par payment is cash on the
+    //expiry date, and there is no bond left to deliver.
+    expect_invalid(
+        hull_white.coupon_bond_put_t(0.05, 1.0, 2.0, &[1.5, 2.0], 0.05, 1.0),
+        "no payment strictly after",
     );
     expect_invalid(
-        hull_white.coupon_bond_put_t(0.05, 1.0, 1.5, &[1.5, 2.0], 0.05, 1.0),
-        "coupon_times[0]",
+        hull_white.coupon_bond_call_t(0.05, 1.0, 2.0, &[2.0], 0.05, 1.0),
+        "no payment strictly after",
+    );
+}
+
+#[test]
+fn coupons_paid_before_option_expiry_price_rather_than_being_refused() {
+    yvf_setup!(hull_white);
+    //A real bond with a real option straddles its own expiry, and that is priceable: the pre-expiry
+    //coupons are simply not part of the underlying, so dropping them changes nothing.
+    let straddling = hull_white
+        .coupon_bond_call_t(0.05, 1.0, 1.5, &[1.25, 1.5, 1.75, 2.0], 0.05, 1.0)
+        .unwrap();
+    let tail = hull_white
+        .coupon_bond_call_t(0.05, 1.0, 1.5, &[1.5, 1.75, 2.0], 0.05, 1.0)
+        .unwrap();
+    assert!(straddling > 0.0, "straddling call {straddling}");
+    assert_eq!(
+        straddling, tail,
+        "a dropped pre-expiry coupon cannot change the price"
     );
 }
 

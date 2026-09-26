@@ -62,6 +62,14 @@
 //! bond's own leg structure and then safeguarded with bisection, rather than run as the
 //! open-ended Newton iteration this crate used to use.
 //!
+//! A coupon schedule may straddle the option's expiry date, because real bonds do.  The underlying
+//! is the bond *as it stands on that date*, so payments made strictly before expiry are dropped
+//! (the holder never receives them), a payment falling exactly on expiry is cash that folds into
+//! the strike, and only payments strictly after expiry are decomposed.  A schedule with nothing
+//! left after the expiry date is refused, since a bond settled before exercise is not a
+//! deliverable underlying.  See [`jamshidian`](crate::jamshidian) for the convention and the
+//! reasoning behind it.
+//!
 //! Boundary cases return the economically correct answer instead of an error:
 //!
 //! * `strike = 0` needs no solve at all: the call is the underlying, the put is worthless.
