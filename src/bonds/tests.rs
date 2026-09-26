@@ -5,25 +5,17 @@ use approx::*;
 
 use crate::HullWhite;
 use crate::schedules::get_coupon_times;
+use crate::test_support::BASELINE;
 
 #[test]
 fn test_bond_now_same_as_t_when_t_is_zero() {
-    let curr_rate = 0.02;
-    let sig: f64 = 0.02;
-    let a: f64 = 0.3;
-    let b = 0.04;
+    let fixture = BASELINE;
+    let curr_rate = fixture.curr_rate;
     let future_time = 0.0;
     let maturity = 1.5;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let bond_price_now = hull_white.bond_price_now(maturity).unwrap();
     let bond_price_t = hull_white
         .bond_price_t(curr_rate, future_time, maturity)
@@ -33,24 +25,15 @@ fn test_bond_now_same_as_t_when_t_is_zero() {
 
 #[test]
 fn test_coupon_bond_now_same_as_t_when_t_is_zero() {
-    let curr_rate = 0.02;
-    let sig: f64 = 0.02;
-    let a: f64 = 0.3;
-    let b = 0.04;
-    let delta = 0.25;
+    let fixture = BASELINE;
+    let curr_rate = fixture.curr_rate;
+    let delta = fixture.delta;
     let future_time = 0.0;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
+    let (yield_curve, forward_curve) = fixture.curves();
     let coupon_times = get_coupon_times(6, future_time, delta).unwrap(); //this was 5, but made six since last payment is now included
     let coupon_rate = 0.05 * delta;
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let bond_price_now = hull_white
         .coupon_bond_price_now(&coupon_times, coupon_rate)
         .unwrap();
@@ -62,22 +45,13 @@ fn test_coupon_bond_now_same_as_t_when_t_is_zero() {
 
 #[test]
 fn test_bond_price() {
-    let curr_rate = 0.02;
-    let sig: f64 = 0.02;
-    let a: f64 = 0.3;
-    let b = 0.04;
+    let fixture = BASELINE;
+    let curr_rate = fixture.curr_rate;
     let future_time = 0.5;
     let option_maturity = 1.5;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     assert_eq!(
         hull_white
             .bond_price_t(curr_rate, future_time, option_maturity)
@@ -90,21 +64,12 @@ fn test_bond_price() {
 
 #[test]
 fn test_bond_price_at_expiry() {
-    let curr_rate = 0.02;
-    let sig: f64 = 0.02;
-    let a: f64 = 0.3;
-    let b = 0.04;
+    let fixture = BASELINE;
+    let curr_rate = fixture.curr_rate;
     let future_time = 0.5;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     assert_eq!(
         hull_white
             .bond_price_t(curr_rate, future_time, future_time)

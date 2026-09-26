@@ -155,11 +155,14 @@
 //! | [`error`] | [`error::HullWhiteError`] |
 //! | `validation` | the input contract every public entry point is checked against |
 //! | `rootfinder` | the bracketed, safeguarded scalar root solver |
+//! | `test_support` | *test / bench only, `#[doc(hidden)]`* — the shared HW-consistent yield and forward curves, and the named calibrations (`flat_5pct`, `steep_curve`, `low_vol`, ...) every test and bench prices off |
 //!
 //! All public items are re-exported here, so `hull_white::HullWhite`, `hull_white::get_coupon_times`
 //! and the rest of the surface resolve from the crate root regardless of which module defines them.
 //! Each module keeps its tests in a sibling `tests.rs` (`src/bonds/tests.rs`, ...); the shared
-//! fixtures used across modules are in `testutil`, compiled under `cfg(test)`.  Outside the crate,
+//! curve fixtures every module prices off live in `test_support`, compiled under `cfg(test)` and
+//! under the hidden `test-support` feature so `benches/` — a separate crate, which cannot see
+//! `cfg(test)` — builds against the same fixture rather than a copy of it.  Outside the crate,
 //! `tests/public_api.rs` walks the whole public surface the way a consumer does: that is the check
 //! that the split moved code without changing what `hull_white::` resolves to.
 
@@ -178,9 +181,13 @@ mod options;
 mod rates;
 mod schedules;
 mod swaps;
-#[cfg(test)]
-mod testutil;
 mod trees;
+
+// Shared fixtures for the tests and the benches: `#[doc(hidden)]` and behind a non-default
+// feature, so it is a build-time helper and not part of `hull_white::`'s public surface.
+#[doc(hidden)]
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 
 pub use model::HullWhite;
 pub use schedules::get_coupon_times;

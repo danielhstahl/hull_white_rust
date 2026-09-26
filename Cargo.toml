@@ -9,6 +9,15 @@ license = "MIT"
 description = "Pricing functions assuming a Hull White short rate"
 edition = "2024"
 
+[features]
+# Shared, internally-consistent curve fixtures (`hull_white::test_support`).
+#
+# Off by default and `#[doc(hidden)]`: this is not part of the crate's public surface.  Unit tests
+# get the module through `cfg(test)`; `benches/` is a separate crate and cannot see `cfg(test)`, so
+# `cargo bench` turns this on (see .github/workflows/bench.yml) to build the benches off the same
+# fixture the tests use instead of a copy of it.
+test-support = []
+
 [dependencies]
 black_scholes = "0.11.0"
 binomial_tree = "0.5.0"

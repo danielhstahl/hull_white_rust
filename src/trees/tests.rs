@@ -9,7 +9,7 @@ use approx::*;
 
 use super::{max_or_zero, payoff_swaption};
 use crate::HullWhite;
-use crate::testutil::{STEEP_A, STEEP_B, STEEP_CURR_RATE, STEEP_SIG, hw_curves};
+use crate::test_support::{STEEP_CURVE, hw_curves};
 
 #[test]
 fn test_max_or_zero() {
@@ -31,10 +31,10 @@ fn test_payoff_swaption() {
 fn european_swaption_tree_matches_analytic_when_t_is_zero() {
     //Guard: when the valuation time is 0 the shifted tree clock and the absolute model clock
     //coincide, so this pins the (already correct) behaviour across the time-coordinate fix.
-    let curr_rate = STEEP_CURR_RATE;
-    let sig = STEEP_SIG;
-    let a = STEEP_A;
-    let b = STEEP_B;
+    let curr_rate = STEEP_CURVE.curr_rate;
+    let sig = STEEP_CURVE.sigma;
+    let a = STEEP_CURVE.a;
+    let b = STEEP_CURVE.b;
     let delta = 0.25;
     let future_time = 0.0;
     let option_maturity = 1.5;
@@ -198,10 +198,10 @@ fn assert_bits_eq(actual: f64, expected: f64, what: &str) {
 fn european_swaption_tree_matches_analytic_when_t_is_nonzero() {
     //Regression for the shifted-vs-absolute time bug: the tree runs on the clock
     //`option_maturity - t` but phi() and the swap legs need absolute time from "now" (0).
-    let curr_rate = STEEP_CURR_RATE;
-    let sig = STEEP_SIG;
-    let a = STEEP_A;
-    let b = STEEP_B;
+    let curr_rate = STEEP_CURVE.curr_rate;
+    let sig = STEEP_CURVE.sigma;
+    let a = STEEP_CURVE.a;
+    let b = STEEP_CURVE.b;
     let delta = 0.25;
     let future_time = 0.5;
     let option_maturity = 1.5;
@@ -275,11 +275,17 @@ fn american_swaption_tree_at_nonzero_t_carries_a_positive_early_exercise_premium
     let future_time = 0.5;
     let option_maturity = 1.5;
     let num_swap_payments = 20;
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
-            STEEP_CURR_RATE,
+            STEEP_CURVE.curr_rate,
             future_time,
             option_maturity,
             num_swap_payments,
@@ -290,7 +296,7 @@ fn american_swaption_tree_at_nonzero_t_carries_a_positive_early_exercise_premium
         if is_payer {
             hull_white
                 .american_payer_swaption_t(
-                    STEEP_CURR_RATE,
+                    STEEP_CURVE.curr_rate,
                     future_time,
                     option_maturity,
                     num_swap_payments,
@@ -302,7 +308,7 @@ fn american_swaption_tree_at_nonzero_t_carries_a_positive_early_exercise_premium
         } else {
             hull_white
                 .american_receiver_swaption_t(
-                    STEEP_CURR_RATE,
+                    STEEP_CURVE.curr_rate,
                     future_time,
                     option_maturity,
                     num_swap_payments,
@@ -318,7 +324,7 @@ fn american_swaption_tree_at_nonzero_t_carries_a_positive_early_exercise_premium
         let european = if is_payer {
             hull_white
                 .european_payer_swaption_t(
-                    STEEP_CURR_RATE,
+                    STEEP_CURVE.curr_rate,
                     future_time,
                     option_maturity,
                     num_swap_payments,
@@ -329,7 +335,7 @@ fn american_swaption_tree_at_nonzero_t_carries_a_positive_early_exercise_premium
         } else {
             hull_white
                 .european_receiver_swaption_t(
-                    STEEP_CURR_RATE,
+                    STEEP_CURVE.curr_rate,
                     future_time,
                     option_maturity,
                     num_swap_payments,

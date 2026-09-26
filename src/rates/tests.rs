@@ -8,14 +8,20 @@ use rand::distributions::{Distribution, StandardNormal};
 
 use crate::HullWhite;
 use crate::error::HullWhiteError;
-use crate::testutil::{STEEP_A, STEEP_B, STEEP_CURR_RATE, STEEP_SIG, get_rng_seed, hw_curves};
+use crate::test_support::{BASELINE, STEEP_CURVE, get_rng_seed};
 
 /// The two routes to a floorlet have to be the same number: the bond-call twin of the caplet's bond
 /// put, and the `t` form run at `(r(0), 0)`.
 #[test]
 fn floorlet_now_is_the_t_form_at_zero() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let r0 = hull_white.short_rate_now().unwrap();
     let delta = 0.25;
     for option_maturity in [0.25, 1.0, 1.5, 5.0] {
@@ -45,22 +51,28 @@ fn floorlet_now_is_the_t_form_at_zero() {
 /// which is `delta * (forward Libor - K)` discounted, and vanishes when the strike is the forward.
 #[test]
 fn cap_floor_parity_is_the_forward_leg() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let delta = 0.25;
     for (t, option_maturity) in [(0.0, 1.0), (0.5, 2.0), (1.0, 1.25), (2.0, 7.0)] {
         for strike in [-0.02, 0.0, 0.02, 0.05, 0.20] {
             let caplet = hull_white
-                .caplet_t(STEEP_CURR_RATE, t, option_maturity, delta, strike)
+                .caplet_t(STEEP_CURVE.curr_rate, t, option_maturity, delta, strike)
                 .unwrap();
             let floorlet = hull_white
-                .floorlet_t(STEEP_CURR_RATE, t, option_maturity, delta, strike)
+                .floorlet_t(STEEP_CURVE.curr_rate, t, option_maturity, delta, strike)
                 .unwrap();
             let near = hull_white
-                .bond_price_t(STEEP_CURR_RATE, t, option_maturity)
+                .bond_price_t(STEEP_CURVE.curr_rate, t, option_maturity)
                 .unwrap();
             let far = hull_white
-                .bond_price_t(STEEP_CURR_RATE, t, option_maturity + delta)
+                .bond_price_t(STEEP_CURVE.curr_rate, t, option_maturity + delta)
                 .unwrap();
             let leg = near - (1.0 + delta * strike) * far;
             assert_abs_diff_eq!(caplet - floorlet, leg, epsilon = 1e-13);
@@ -92,8 +104,14 @@ fn cap_floor_parity_is_the_forward_leg() {
 /// the two sides is the same one.
 #[test]
 fn floor_and_cap_agree_at_the_forward_strike() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let delta = 0.25;
     for option_maturity in [1.0, 2.5, 4.0] {
         let forward = hull_white
@@ -132,8 +150,14 @@ fn floor_and_cap_agree_at_the_forward_strike() {
 /// call rather than in a caller-managed loop.
 #[test]
 fn cap_and_floor_are_the_sum_of_their_periods() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let delta = 0.25;
     let strikes = [0.02, 0.03, 0.04, 0.05, 0.06];
     let periods: Vec<(f64, f64)> = (1..=20)
@@ -223,9 +247,15 @@ fn cap_and_floor_are_the_sum_of_their_periods() {
 /// An empty schedule is not a free cap, and one bad period is not a dropped leg.
 #[test]
 fn cap_and_floor_schedule_errors() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
-    let delta = 0.25;
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
+    let delta = STEEP_CURVE.delta;
     for empty in [
         hull_white.cap_now(&[], delta),
         hull_white.floor_now(&[], delta),
@@ -268,24 +298,15 @@ fn cap_and_floor_schedule_errors() {
 
 #[test]
 fn compare_caplet() {
-    let curr_rate = 0.02;
-    let sig: f64 = 0.02;
-    let a: f64 = 0.3;
-    let b = 0.04;
+    let fixture = BASELINE;
+    let curr_rate = fixture.curr_rate;
     let future_time = 0.0;
     let option_maturity = 1.5;
     let strike = 0.02;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let delta = 0.25;
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let delta = fixture.delta;
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let caplet_n = hull_white
         .caplet_now(option_maturity, delta, strike)
         .unwrap();
@@ -297,23 +318,14 @@ fn compare_caplet() {
 
 #[test]
 fn compare_libor() {
-    let curr_rate = 0.02;
-    let sig: f64 = 0.02;
-    let a: f64 = 0.3;
-    let b = 0.04;
+    let fixture = BASELINE;
+    let curr_rate = fixture.curr_rate;
     let future_time = 0.0;
     let maturity = 1.5;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let delta = 0.25;
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let delta = fixture.delta;
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let libor_n = hull_white.forward_libor_rate_now(maturity, delta).unwrap();
     let libor_t = hull_white
         .forward_libor_rate_t(curr_rate, future_time, maturity, delta)
@@ -323,29 +335,20 @@ fn compare_libor() {
 
 #[test]
 fn test_caplet() {
-    let curr_rate = 0.02;
-    let sig: f64 = 0.02;
-    let a: f64 = 0.3;
-    let b = 0.04;
+    let fixture = BASELINE;
+    let curr_rate = fixture.curr_rate;
     let future_time = 0.0;
     let option_maturity = 1.5;
     let strike = 0.02;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let delta = 0.25;
+    let (yield_curve, forward_curve) = fixture.curves();
+    let delta = fixture.delta;
     let seed: [u8; 32] = [2; 32];
     let mut rng_seed = get_rng_seed(seed);
     let normal = StandardNormal;
     let num_sims: usize = 1000; //hopefully accurate
     let num_discrete_steps: usize = 1000;
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let total_sum = (0..num_sims).fold(0.0, |accum, _sample_index| {
         let mut sum_r = 0.0;
         let mut running_r = curr_rate;
@@ -391,27 +394,18 @@ fn test_caplet() {
 
 #[test]
 fn test_edf() {
-    let curr_rate = 0.02;
-    let sig: f64 = 0.02;
-    let a: f64 = 0.3;
-    let b = 0.04;
+    let fixture = BASELINE;
+    let curr_rate = fixture.curr_rate;
     let future_time = 0.0;
     let option_maturity = 1.5;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let delta = 0.25;
+    let (yield_curve, forward_curve) = fixture.curves();
+    let delta = fixture.delta;
     let seed: [u8; 32] = [2; 32];
     let mut rng_seed = get_rng_seed(seed);
     let normal = StandardNormal;
     let num_sims: usize = 1000000; //hopefully accurate
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let mu = hull_white
         .mu_r(curr_rate, future_time, option_maturity)
         .unwrap();
@@ -445,29 +439,20 @@ fn test_edf() {
 /// `cap_floor_parity_is_the_forward_leg` in the other direction.
 #[test]
 fn test_floorlet() {
-    let curr_rate = 0.02;
-    let sig: f64 = 0.02;
-    let a: f64 = 0.3;
-    let b = 0.04;
+    let fixture = BASELINE;
+    let curr_rate = fixture.curr_rate;
     let future_time = 0.0;
     let option_maturity = 1.5;
     let strike = 0.05;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
+    let (yield_curve, forward_curve) = fixture.curves();
     let delta = 0.25;
     let seed: [u8; 32] = [2; 32];
     let mut rng_seed = get_rng_seed(seed);
     let normal = StandardNormal;
     let num_sims: usize = 1000; //hopefully accurate
     let num_discrete_steps: usize = 1000;
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let total_sum = (0..num_sims).fold(0.0, |accum, _sample_index| {
         let mut sum_r = 0.0;
         let mut running_r = curr_rate;

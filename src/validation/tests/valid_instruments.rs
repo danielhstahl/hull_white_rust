@@ -4,14 +4,14 @@
 use approx::*;
 
 use crate::schedules::get_coupon_times;
-use crate::testutil::yvf_setup;
+use crate::test_support::hw_setup;
 
 #[test]
 fn valid_instruments_still_price() {
     //Smoke test for the other side of the contract: nothing that used to be valid got caught by
     //the guards.  The 32 pre-existing numerical tests (including the bit-exact swaption pins)
     //are the real regression net; this walks every public entry point once.
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     let coupon_times = get_coupon_times(4, 1.0, 0.25).unwrap();
     assert_eq!(coupon_times.len(), 4);
     //bond schedules for the option entry points must sit entirely beyond expiry

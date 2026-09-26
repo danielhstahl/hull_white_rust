@@ -8,14 +8,20 @@ use approx::*;
 
 use crate::HullWhite;
 use crate::error::HullWhiteError;
-use crate::testutil::{STEEP_A, STEEP_B, STEEP_CURR_RATE, STEEP_SIG, hw_curves};
+use crate::test_support::STEEP_CURVE;
 
 #[test]
 fn steep_fixture_actually_makes_phi_time_dependent() {
     //Protects the tests above: if phi were constant, a time-coordinate error would cancel out
     //and the regression tests would pass for the wrong reason.
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let phi_0 = hull_white.phi_t(0.0);
     let phi_5 = hull_white.phi_t(5.0);
     assert!(
@@ -26,15 +32,21 @@ fn steep_fixture_actually_makes_phi_time_dependent() {
 
 /// `r(0)` is the instantaneous forward at the front of the curve, not the cumulative yield.
 ///
-/// The `hw_curves` fixture is a Vasicek short rate starting at `STEEP_CURR_RATE`, so the right
+/// The `hw_curves` fixture is a Vasicek short rate starting at `STEEP_CURVE.curr_rate`, so the right
 /// answer is known independently of the model code: `short_rate_now()` has to come back with that
 /// rate, and `yield_curve(0.0)` -- the tempting wrong answer -- is 0.
 #[test]
 fn short_rate_now_is_the_instantaneous_forward_at_zero() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let r0 = hull_white.short_rate_now().unwrap();
-    assert_abs_diff_eq!(r0, STEEP_CURR_RATE, epsilon = 1e-12);
+    assert_abs_diff_eq!(r0, STEEP_CURVE.curr_rate, epsilon = 1e-12);
     assert_abs_diff_eq!(r0, forward_curve(0.0), epsilon = 1e-12);
     assert_abs_diff_eq!(r0, hull_white.phi_t(0.0), epsilon = 0.0);
     //...and emphatically not the cumulative yield at 0, which is zero for any integrated curve.
@@ -50,8 +62,14 @@ fn short_rate_now_is_the_instantaneous_forward_at_zero() {
 /// routes through `r(0)` would price a different bond than the `*_now` bond pricers do.
 #[test]
 fn short_rate_now_makes_the_t_and_now_bond_prices_agree() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let r0 = hull_white.short_rate_now().unwrap();
     for maturity in [0.0, 0.25, 1.0, 3.0, 7.5, 20.0] {
         let via_t = hull_white.bond_price_t(r0, 0.0, maturity).unwrap();

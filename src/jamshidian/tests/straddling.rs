@@ -12,7 +12,7 @@
 //! two references share no code with each other or with the pricer.
 
 use crate::HullWhite;
-use crate::testutil::{STEEP_A, STEEP_B, STEEP_CURR_RATE, STEEP_SIG, hw_curves};
+use crate::test_support::{STEEP_CURVE, hw_curves};
 
 use super::{FIXTURES, payoff_integral};
 
@@ -148,9 +148,9 @@ fn a_straddling_schedule_matches_the_direct_payoff_integral() {
     //The headline check for the convention: the decomposition of the residual bond, against a
     //quadrature of the payoff the holder actually has.
     let strikes = [0.3f64, 0.7, 0.95, 1.0, 1.05, 1.3, 2.0];
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         for schedule in STRADDLING.iter() {
             for &strike in strikes.iter() {
                 for is_call in [true, false] {
@@ -173,8 +173,14 @@ fn a_straddling_schedule_with_a_negative_coupon_rate_matches_the_integral() {
     //the split non-trivial: the dropped payments were *negative* cash, the payment on the expiry
     //date arrives as a strike increase, and the par still has to land on the schedule's final
     //payment rather than on whatever happens to be the residual's last one.
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     for schedule in STRADDLING.iter() {
         for coupon_rate in [-0.02f64, -0.005, -0.0001] {
             for strike in [0.5f64, 0.9, 0.95, 1.0, 1.2] {
@@ -196,9 +202,9 @@ fn a_straddling_schedule_with_a_negative_coupon_rate_matches_the_integral() {
 fn dropping_the_pre_expiry_coupons_cannot_change_the_price() {
     //Everything strictly before expiry is worth nothing on the expiry date, so dropping it is a
     //no-op: the full schedule and the post-expiry tail are the same instrument.
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         for schedule in STRADDLING.iter() {
             let tail = tail_only(schedule, U);
             if tail == *schedule {
@@ -232,9 +238,9 @@ fn a_coupon_on_the_expiry_date_is_a_strike_reduction() {
     //A payment settled exactly on the expiry date is worth its weight there whatever the rate does,
     //so pricing the schedule that carries it must equal pricing the residual against a strike
     //shrunk by that cash: (cash + R - K)^+ == (R - (K - cash))^+.
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         let residual = &[2.25, 2.5, 3.0][..];
         let carrying_cash = &[2.0, 2.25, 2.5, 3.0][..];
         for &strike in [0.7f64, 0.95, 1.0, 1.3].iter() {
@@ -261,9 +267,9 @@ fn a_strike_at_or_below_the_expiry_cash_is_exercised_in_every_state() {
     //The cash settled on the expiry date is a floor on the deliverable that no rate can remove, so
     //at a strike at or below it the call is parity and the put is nothing, with nothing left to
     //solve for.  The quadrature checks the same thing from the payoff.
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         let carrying_cash = &[2.0, 2.25, 2.5, 3.0][..];
         //The floor is one coupon here, and the deliverable really is above it at every rate the
         //option can reach: sample the whole state space the quadrature integrates over.
@@ -311,9 +317,9 @@ fn a_straddling_schedule_agrees_with_a_short_rate_tree() {
     //over 100..400 steps is ~2e-4 and it shrinks monotonically with the step count, so 1e-3 is
     //the tolerance and the tree's own convergence is asserted separately.
     let strikes = [0.7f64, 0.95, 1.0, 1.3];
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         for schedule in STRADDLING.iter() {
             let deliverable =
                 |rate: f64| deliverable_at_expiry(&hull_white, U, schedule, COUPON_RATE, rate);

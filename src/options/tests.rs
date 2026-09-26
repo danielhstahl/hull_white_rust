@@ -6,29 +6,20 @@ use approx::*;
 
 use crate::HullWhite;
 use crate::error::HullWhiteError;
-use crate::testutil::{STEEP_A, STEEP_B, STEEP_CURR_RATE, STEEP_SIG, hw_curves};
+use crate::test_support::{STEEP_CURVE, VASICEK_REFERENCE};
 
 #[test]
 fn zero_coupon_reference() {
     //http://www.quantcalc.net/BondOption_Vasicek.html
-    let curr_rate = 0.01;
-    let sig: f64 = 0.03;
-    let a = 0.05;
-    let b = 0.04;
+    let fixture = VASICEK_REFERENCE;
+    let curr_rate = fixture.curr_rate;
     let strike = 0.96;
     let future_time = 0.0;
     let bond_maturity = 3.0;
     let option_maturity = 2.0;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let bond_call = hull_white
         .bond_call_t(
             curr_rate,
@@ -43,24 +34,15 @@ fn zero_coupon_reference() {
 
 #[test]
 fn zero_coupon_to_coupon() {
-    let curr_rate = 0.01;
-    let sig: f64 = 0.03;
-    let a = 0.05;
-    let b = 0.04;
+    let fixture = VASICEK_REFERENCE;
+    let curr_rate = fixture.curr_rate;
     let strike = 0.96;
     let future_time = 0.0;
     let bond_maturity = 3.0;
     let option_maturity = 2.0;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let bond_call = hull_white
         .bond_call_t(
             curr_rate,
@@ -91,8 +73,14 @@ fn zero_coupon_to_coupon() {
 /// instrument: `r(0)` from `short_rate_now` is the state, and nothing else about the price changes.
 #[test]
 fn coupon_bond_option_now_matches_the_t_form_at_zero() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let r0 = hull_white.short_rate_now().unwrap();
     let coupon_times = [1.75, 2.0, 2.25, 2.5];
     let coupon_rate = 0.05;
@@ -124,8 +112,14 @@ fn coupon_bond_option_now_matches_the_t_form_at_zero() {
 /// the option on a different side of the money, so a one-sided error in the leg strikes would show.
 #[test]
 fn coupon_bond_option_parity_at_now() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let coupon_times = [1.75, 2.0, 2.25, 2.5];
     let coupon_rate = 0.05;
     let option_maturity = 1.5;
@@ -161,8 +155,14 @@ fn coupon_bond_option_parity_at_now() {
 /// underlying, and the coupon settling on the expiry date is a strike reduction on the residual.
 #[test]
 fn coupon_bond_option_now_keeps_the_straddle_convention() {
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let option_maturity = 1.5;
     let coupon_rate = 0.05;
     let full = [1.25, 1.5, 1.75, 2.0, 2.25, 2.5];

@@ -7,7 +7,7 @@
 //! decomposition pins the bracket, the solve and the leg weighting at once.
 
 use crate::HullWhite;
-use crate::testutil::{STEEP_A, STEEP_B, STEEP_CURR_RATE, STEEP_SIG, hw_curves};
+use crate::test_support::{FLAT_5PCT, HIGH_VOL, QUICK_REVERSION, STEEP_CURVE, Scenario};
 
 fn simpson(f: &dyn Fn(f64) -> f64, a: f64, b: f64, panels: usize) -> f64 {
     let panels = panels.max(2) + (panels % 2); //Simpson needs an even panel count
@@ -185,13 +185,10 @@ fn payoff_integral(
     hull_white.bond_price_t(r_t, t, option_maturity).unwrap() * fine
 }
 
-const FIXTURES: [(f64, f64, f64, f64); 4] = [
-    //curr_rate, a, b, sigma
-    (0.05, 0.05, 0.05, 0.01),
-    (STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG),
-    (0.05, 0.1, 0.08, 0.08),
-    (0.03, 0.4, 0.045, 0.005),
-];
+/// The four calibrations every Jamshidian check runs over, spanning the fixture's parameter
+/// space instead of sitting in the middle of it: flat, steep, the far-vol corner where the
+/// critical rate has to travel, and the fast, quiet one where it barely moves.
+const FIXTURES: [Scenario; 4] = [FLAT_5PCT, STEEP_CURVE, HIGH_VOL, QUICK_REVERSION];
 
 #[test]
 fn the_forward_measure_drift_reproduces_the_bond_price() {
@@ -200,9 +197,10 @@ fn the_forward_measure_drift_reproduces_the_bond_price() {
     //drift this is out by ~1e-4, which is exactly the size of error that was showing up in
     //every option comparison below until the measure was fixed.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let name = s.name;
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         let (r_t, t, u) = (0.04, 1.0, 2.0);
         let bond = hull_white
             .coupon_bond_price_t(r_t, t, &times, 0.05)
@@ -223,7 +221,7 @@ fn the_forward_measure_drift_reproduces_the_bond_price() {
         let repriced = hull_white.bond_price_t(r_t, t, u).unwrap() * expected_value;
         assert!(
             (repriced - bond).abs() < 1e-12,
-            "fixture {curr},{a},{b},{sigma}: repriced {repriced} vs bond {bond}"
+            "fixture {name}: repriced {repriced} vs bond {bond}"
         );
     }
 }
@@ -234,9 +232,10 @@ fn jamshidian_matches_the_direct_payoff_integral() {
     //over the payoff that shares none of them.  The worst deviation across this whole grid is
     //about 2e-12.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let name = s.name;
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         for strike in [0.5f64, 0.8, 0.95, 1.0, 1.05, 1.3, 3.0] {
             for is_call in [true, false] {
                 let priced = if is_call {
@@ -252,7 +251,7 @@ fn jamshidian_matches_the_direct_payoff_integral() {
                     direct_payoff_price(&hull_white, 0.04, 1.0, 2.0, &times, 0.05, strike, is_call);
                 assert!(
                     (priced - reference).abs() <= 1e-10f64.max(reference.abs() * 1e-9),
-                    "fixture {curr},{a},{b},{sigma} {side} strike {strike}: {priced} vs {reference}",
+                    "fixture {name} {side} strike {strike}: {priced} vs {reference}",
                     side = if is_call { "call" } else { "put" }
                 );
             }
@@ -265,9 +264,10 @@ fn a_fine_strike_ladder_around_the_money_matches_the_integral() {
     //At the money the price is most sensitive to the critical rate, so a fine ladder through
     //the ATM region is where a sloppy root shows up first.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let name = s.name;
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         let (r_t, t, u) = (0.04, 1.0, 2.0);
         let underlying = hull_white
             .coupon_bond_price_t(r_t, t, &times, 0.05)
@@ -288,7 +288,7 @@ fn a_fine_strike_ladder_around_the_money_matches_the_integral() {
                     direct_payoff_price(&hull_white, r_t, t, u, &times, 0.05, strike, is_call);
                 assert!(
                     (priced - reference).abs() <= 1e-10f64.max(reference.abs() * 1e-9),
-                    "fixture {curr},{a},{b},{sigma} {side} strike {strike}: {priced} vs {reference}",
+                    "fixture {name} {side} strike {strike}: {priced} vs {reference}",
                     side = if is_call { "call" } else { "put" }
                 );
             }
@@ -302,8 +302,14 @@ fn a_negative_coupon_schedule_still_prices() {
     //legs pay one -- and nothing in the decomposition needs the coupon to be positive as
     //long as the weights keep their sign.  The reference checks it independently.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let (r_t, t, u) = (0.04, 1.0, 2.0);
     for coupon_rate in [-0.02f64, -0.005, -0.0001] {
         for strike in [0.5f64, 0.9, 0.95, 1.0, 1.2] {

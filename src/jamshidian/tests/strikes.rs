@@ -2,7 +2,7 @@
 //! out that the bracket degenerates but the price is still reported rather than refused.
 
 use crate::HullWhite;
-use crate::testutil::{STEEP_A, STEEP_B, STEEP_CURR_RATE, STEEP_SIG, hw_curves};
+use crate::test_support::STEEP_CURVE;
 
 use super::FIXTURES;
 
@@ -12,9 +12,10 @@ fn a_zero_strike_call_is_the_underlying_and_a_zero_strike_put_is_worthless() {
     //be a guaranteed RootFindingError.  What the answer has to be: the call is the present
     //value of the underlying, the put is nothing.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let name = s.name;
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         let underlying = hull_white
             .coupon_bond_price_t(0.04, 1.0, &times, 0.05)
             .unwrap();
@@ -26,9 +27,9 @@ fn a_zero_strike_call_is_the_underlying_and_a_zero_strike_put_is_worthless() {
             .unwrap();
         assert!(
             (call - underlying).abs() <= underlying.abs() * 1e-12,
-            "fixture {curr},{a},{b},{sigma}: call {call} vs underlying {underlying}"
+            "fixture {name}: call {call} vs underlying {underlying}"
         );
-        assert_eq!(put, 0.0, "fixture {curr},{a},{b},{sigma}: put {put}");
+        assert_eq!(put, 0.0, "fixture {name}: put {put}");
     }
 }
 
@@ -37,8 +38,14 @@ fn put_call_parity_holds_whatever_the_strike() {
     //C - P = PV(underlying) - K * P(t,U), to machine precision, including at zero strike.
     //A solve that lands on the wrong critical rate breaks this immediately.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let (r_t, t, u) = (0.04, 1.0, 2.0);
     let underlying = hull_white
         .coupon_bond_price_t(r_t, t, &times, 0.05)
@@ -69,8 +76,14 @@ fn an_extreme_strike_prices_rather_than_erroring() {
     //RootFindingError("NaN") because the old Newton iterate blew up on the flat of the
     //exponential.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     for strike in [1e3f64, 1e8, 1e12] {
         let call = hull_white
             .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, strike)

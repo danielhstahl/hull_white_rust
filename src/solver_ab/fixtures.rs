@@ -12,6 +12,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::test_support::hw_curves;
+
 // The pre-rootfinder configuration, verbatim from the implementation this replaced: bare Newton
 // from a hard-coded 3% (`nrfind::find_root(&f, &df, R_INIT, PREC_1, MAX_ITER)`), converged on
 // the size of the step it took rather than on the root.
@@ -38,6 +40,12 @@ pub(super) fn reps() -> usize {
 ///
 /// Every zero-coupon leg price funnels through the yield and forward curves, so a count of curve
 /// calls is a measure of model work that no solver can game.
+///
+/// The yield curve is the shared [`hw_curves`] fixture with a counter wrapped around it, so the
+/// harness measures the same curve the tests price off.  The forward curve deliberately is *not*
+/// the fixture's: the harness only ever compares this solver against the old one over the same
+/// inputs, and a cheap stand-in keeps the measured call count the thing being measured.  Swapping
+/// in the real one would move every table in the A/B report without saying anything new.
 pub(super) struct Counted {
     pub(super) yield_curve: Box<dyn Fn(f64) -> f64 + Sync>,
     pub(super) forward_curve: Box<dyn Fn(f64) -> f64 + Sync>,
@@ -49,12 +57,10 @@ impl Counted {
         let calls = Arc::new(AtomicUsize::new(0));
         let yield_curve = {
             let calls = calls.clone();
+            let fixture = hw_curves(curr, a, b, sig).0;
             Box::new(move |t: f64| {
                 calls.fetch_add(1, Ordering::Relaxed);
-                let at = (1.0 - (-a * t).exp()) / a;
-                let ct = (b - sig * sig / (2.0 * a * a)) * (at - t)
-                    - (sig * at) * (sig * at) / (4.0 * a);
-                at * curr - ct
+                fixture(t)
             })
         };
         let forward_curve = {

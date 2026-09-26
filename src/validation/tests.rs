@@ -12,7 +12,7 @@
 
 use crate::error::HullWhiteError;
 use crate::schedules::get_coupon_times;
-use crate::testutil::yvf_setup;
+use crate::test_support::hw_setup;
 
 fn expect_invalid<T: std::fmt::Debug>(result: Result<T, HullWhiteError>, needle: &str) {
     match result {
@@ -27,7 +27,7 @@ fn expect_invalid<T: std::fmt::Debug>(result: Result<T, HullWhiteError>, needle:
 
 #[test]
 fn empty_coupon_times_is_invalid_input() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     expect_invalid(
         hull_white.coupon_bond_price_t(0.05, 1.0, &[], 0.05),
         "coupon_times is empty",
@@ -48,7 +48,7 @@ fn empty_coupon_times_is_invalid_input() {
 
 #[test]
 fn unascending_coupon_times_is_invalid_input() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     //descending step at index 1
     expect_invalid(
         hull_white.coupon_bond_price_t(0.05, 1.0, &[1.25, 1.0, 1.5], 0.05),
@@ -63,7 +63,7 @@ fn unascending_coupon_times_is_invalid_input() {
 
 #[test]
 fn coupon_time_at_or_before_valuation_time_is_invalid_input() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     //exactly on the valuation date: already paid
     expect_invalid(
         hull_white.coupon_bond_price_t(0.05, 1.0, &[1.25, 1.0], 0.05),
@@ -83,7 +83,7 @@ fn coupon_time_at_or_before_valuation_time_is_invalid_input() {
 
 #[test]
 fn expired_swap_is_invalid_input() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     //matured before the valuation date
     expect_invalid(
         hull_white.swap_price_t(0.05, 1.0, 0.75, 0.25, 0.04),
@@ -98,7 +98,7 @@ fn expired_swap_is_invalid_input() {
 
 #[test]
 fn non_positive_delta_is_invalid_input() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     for delta in [0.0, -0.25] {
         expect_invalid(get_coupon_times(4, 1.0, delta), "delta");
         expect_invalid(
@@ -129,7 +129,7 @@ fn non_positive_delta_is_invalid_input() {
 
 #[test]
 fn zero_period_instrument_is_invalid_input() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     expect_invalid(
         hull_white.swap_price_t_init(0.05, 1.0, 1.0, 0, 0.25, 0.04),
         "num_swap_payments",
@@ -154,7 +154,7 @@ fn zero_period_instrument_is_invalid_input() {
 
 #[test]
 fn non_finite_input_is_invalid_input_and_is_named() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     let nan = f64::NAN;
     let inf = f64::INFINITY;
     expect_invalid(hull_white.bond_price_t(nan, 0.0, 2.0), "r_t");
@@ -178,7 +178,7 @@ fn non_finite_input_is_invalid_input_and_is_named() {
 
 #[test]
 fn negative_valuation_time_is_invalid_input() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     expect_invalid(hull_white.bond_price_t(0.05, -1.0, 2.0), "t");
     expect_invalid(hull_white.swap_price_t(0.05, -1.0, 3.0, 0.25, 0.04), "t");
     expect_invalid(
@@ -193,7 +193,7 @@ fn negative_valuation_time_is_invalid_input() {
 
 #[test]
 fn bond_option_needs_the_underlying_to_outlive_the_option() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     //bond maturing at expiry leaves nothing to deliver; before expiry is not deliverable at all
     expect_invalid(
         hull_white.bond_call_t(0.05, 0.5, 1.5, 1.5, 0.98),
@@ -209,7 +209,7 @@ fn bond_option_needs_the_underlying_to_outlive_the_option() {
 
 #[test]
 fn a_bond_settled_by_its_option_expiry_is_invalid_input() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     //The underlying of the decomposed option is the bond *at* expiry, so a schedule that straddles
     //expiry is fine -- but a bond with nothing left to deliver after the expiry date is not an
     //underlying at all.
@@ -231,7 +231,7 @@ fn a_bond_settled_by_its_option_expiry_is_invalid_input() {
 
 #[test]
 fn coupons_paid_before_option_expiry_price_rather_than_being_refused() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     //A real bond with a real option straddles its own expiry, and that is priceable: the pre-expiry
     //coupons are simply not part of the underlying, so dropping them changes nothing.
     let straddling = hull_white
@@ -249,7 +249,7 @@ fn coupons_paid_before_option_expiry_price_rather_than_being_refused() {
 
 #[test]
 fn caplet_strike_that_breaks_the_bond_put_transform_is_invalid() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     //1 + delta * strike == 0 makes the transformed strike 1/0
     expect_invalid(
         hull_white.caplet_t(0.05, 1.0, 1.5, 0.25, -4.0),
@@ -265,7 +265,7 @@ fn caplet_strike_that_breaks_the_bond_put_transform_is_invalid() {
 
 #[test]
 fn non_finite_computed_result_surfaces_as_numerical_error() {
-    yvf_setup!(hull_white);
+    hw_setup!(hull_white);
     //Inputs are all finite and ordered, but exp() overflows: that is a numerical failure and
     //must not be reported as a price.
     let err = hull_white.bond_price_t(-1e3, 0.0, 10.0).unwrap_err();

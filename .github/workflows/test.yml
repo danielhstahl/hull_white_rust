@@ -46,7 +46,7 @@ jobs:
           rust-version: nightly
 
       - name: benchmark
-        run: cargo bench | tee output.txt
+        run: cargo bench --features test-support | tee output.txt
 
       - name: Download previous benchmark data
         uses: actions/cache@v5

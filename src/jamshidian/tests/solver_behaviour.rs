@@ -4,7 +4,7 @@
 
 use crate::HullWhite;
 use crate::SolverSettings;
-use crate::testutil::{STEEP_A, STEEP_B, STEEP_CURR_RATE, STEEP_SIG, hw_curves};
+use crate::test_support::STEEP_CURVE;
 
 use super::{FIXTURES, direct_payoff_price};
 
@@ -13,19 +13,29 @@ fn the_price_does_not_depend_on_where_the_solver_starts() {
     //The old solver started from a hard-coded 3% and its answer moved with that guess.  With
     //a real bracket and a bisection guard, any seed reaches the same root.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let reference = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
-        .unwrap()
-        .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
-        .unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let reference = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap()
+    .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
+    .unwrap();
     for seed in [-1.0f64, 0.0, 0.03, 0.5, 5.0, 50.0, 1e3, 1e6] {
-        let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
-            .unwrap()
-            .with_solver(SolverSettings {
-                initial_guess: Some(seed),
-                ..SolverSettings::default()
-            })
-            .unwrap();
+        let hull_white = HullWhite::init(
+            STEEP_CURVE.a,
+            STEEP_CURVE.sigma,
+            &yield_curve,
+            &forward_curve,
+        )
+        .unwrap()
+        .with_solver(SolverSettings {
+            initial_guess: Some(seed),
+            ..SolverSettings::default()
+        })
+        .unwrap();
         let priced = hull_white
             .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
             .unwrap();
@@ -41,14 +51,15 @@ fn the_bracket_actually_brackets() {
     //The analytic bracket has to straddle the critical rate: bond value above the strike at
     //the low end, below it at the high end, and the solved root in between.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let name = s.name;
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         let (r_t, t, u) = (0.04, 1.0, 2.0);
         for strike in [0.5f64, 0.8, 0.95, 1.0, 1.05, 1.3, 3.0] {
             let (lower, upper) = hull_white
                 .critical_rate_bracket(u, &times, 0.05, strike)
-                .unwrap_or_else(|| panic!("no bracket for {curr},{a},{b},{sigma} strike {strike}"));
+                .unwrap_or_else(|| panic!("no bracket for {name} strike {strike}"));
             let gap = |rate: f64| {
                 hull_white
                     .coupon_bond_price_t(rate, u, &times, 0.05)
@@ -57,12 +68,12 @@ fn the_bracket_actually_brackets() {
             };
             assert!(
                 gap(lower) >= 0.0,
-                "{curr},{a},{b},{sigma} strike {strike}: low end {lower} gives {}",
+                "{name} strike {strike}: low end {lower} gives {}",
                 gap(lower)
             );
             assert!(
                 gap(upper) <= 0.0,
-                "{curr},{a},{b},{sigma} strike {strike}: high end {upper} gives {}",
+                "{name} strike {strike}: high end {upper} gives {}",
                 gap(upper)
             );
             let solution = hull_white
@@ -70,7 +81,7 @@ fn the_bracket_actually_brackets() {
                 .unwrap();
             assert!(
                 solution.root >= lower && solution.root <= upper,
-                "{curr},{a},{b},{sigma} strike {strike}: root {} outside [{lower}, {upper}]",
+                "{name} strike {strike}: root {} outside [{lower}, {upper}]",
                 solution.root
             );
         }
@@ -84,8 +95,14 @@ fn a_single_coupon_schedule_reduces_to_the_zero_coupon_option() {
     //is the plain zero-coupon bond option, priced here without any root find at all.
     //
     //  (1 + c) * call_discount(P(t,T), K / (1 + c), P(t,U), sigma_leg)
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let hull_white = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let hull_white = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap();
     let (r_t, t, u) = (0.04, 1.0, 2.0);
     for bond_maturity in [2.5f64, 4.0, 10.0] {
         for coupon_rate in [0.05f64, 0.01, -0.02] {
@@ -148,9 +165,10 @@ fn a_forty_eight_coupon_schedule_prices_against_the_integral() {
     //deep OTM.  Still agrees with the direct payoff integral.
     let schedule: Vec<f64> = (1..=48).map(|i| 2.0 + 0.5 * i as f64).collect();
     assert_eq!(schedule.len(), 48);
-    for &(curr, a, b, sigma) in FIXTURES.iter() {
-        let (yield_curve, forward_curve) = hw_curves(curr, a, b, sigma);
-        let hull_white = HullWhite::init(a, sigma, &yield_curve, &forward_curve).unwrap();
+    for s in FIXTURES.iter() {
+        let name = s.name;
+        let (yield_curve, forward_curve) = s.curves();
+        let hull_white = HullWhite::init(s.a, s.sigma, &yield_curve, &forward_curve).unwrap();
         let (r_t, t, u) = (0.04, 1.0, 2.0);
         let underlying = hull_white
             .coupon_bond_price_t(r_t, t, &schedule, 0.05)
@@ -171,7 +189,7 @@ fn a_forty_eight_coupon_schedule_prices_against_the_integral() {
                     direct_payoff_price(&hull_white, r_t, t, u, &schedule, 0.05, strike, is_call);
                 assert!(
                     (priced - reference).abs() <= 1e-9f64.max(reference.abs() * 1e-9),
-                    "fixture {curr},{a},{b},{sigma} {side} strike {strike}: {priced} vs {reference}",
+                    "fixture {name} {side} strike {strike}: {priced} vs {reference}",
                     side = if is_call { "call" } else { "put" }
                 );
                 //Parity on the same instrument, for a second independent angle.
@@ -189,7 +207,7 @@ fn a_forty_eight_coupon_schedule_prices_against_the_integral() {
                 let expected = if is_call { parity } else { -parity };
                 assert!(
                     (priced - other - expected).abs() <= 1e-9f64.max(parity.abs() * 1e-10),
-                    "fixture {curr},{a},{b},{sigma} strike {strike}: {} vs {}",
+                    "fixture {name} strike {strike}: {} vs {}",
                     priced - other,
                     expected
                 );
@@ -203,14 +221,19 @@ fn a_starved_solver_says_which_stage_failed() {
     //A failure names the stage that failed instead of handing back a bare number: too few
     //iterations to converge, in the context of the instrument being priced.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
-    let starved = HullWhite::init(STEEP_A, STEEP_SIG, &yield_curve, &forward_curve)
-        .unwrap()
-        .with_solver(SolverSettings {
-            max_iterations: 1,
-            ..SolverSettings::default()
-        })
-        .unwrap();
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
+    let starved = HullWhite::init(
+        STEEP_CURVE.a,
+        STEEP_CURVE.sigma,
+        &yield_curve,
+        &forward_curve,
+    )
+    .unwrap()
+    .with_solver(SolverSettings {
+        max_iterations: 1,
+        ..SolverSettings::default()
+    })
+    .unwrap();
     let error = starved
         .coupon_bond_call_t(0.04, 1.0, 2.0, &times, 0.05, 0.95)
         .unwrap_err();
@@ -233,15 +256,16 @@ fn worst_price_err(
     forward_curve: &(impl Fn(f64) -> f64 + Sync),
     times: &[f64],
 ) -> f64 {
-    let reference_model = HullWhite::init(STEEP_A, STEEP_SIG, yield_curve, forward_curve)
-        .unwrap()
-        .with_solver(SolverSettings {
-            tolerance: 1e-15,
-            max_iterations: 500,
-            initial_guess: None,
-        })
-        .unwrap();
-    let model = HullWhite::init(STEEP_A, STEEP_SIG, yield_curve, forward_curve)
+    let reference_model =
+        HullWhite::init(STEEP_CURVE.a, STEEP_CURVE.sigma, yield_curve, forward_curve)
+            .unwrap()
+            .with_solver(SolverSettings {
+                tolerance: 1e-15,
+                max_iterations: 500,
+                initial_guess: None,
+            })
+            .unwrap();
+    let model = HullWhite::init(STEEP_CURVE.a, STEEP_CURVE.sigma, yield_curve, forward_curve)
         .unwrap()
         .with_solver(SolverSettings {
             tolerance,
@@ -266,7 +290,7 @@ fn a_looser_root_tolerance_is_visible_in_the_price() {
     //The reason the tolerance is configurable at all: the old hard-coded 1e-7 capped how
     //accurate a price anyone could get, and now that cap is measurable instead of invisible.
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
     let loose = worst_price_err(1e-4, &yield_curve, &forward_curve, &times);
     let tight = worst_price_err(1e-14, &yield_curve, &forward_curve, &times);
     println!("tolerance 1e-4 worst price err {loose:e}; 1e-14 worst price err {tight:e}");
@@ -282,7 +306,7 @@ fn the_root_tolerance_bounds_the_search_not_the_achieved_error() {
     //better than the correction's size, so the old 1e-7 cap is no longer a cap on accuracy:
     //1e-7 now lands on the same price as 1e-14 (both sit on the model's round-off floor).
     let times = [2.5, 3.0, 3.5, 4.0];
-    let (yield_curve, forward_curve) = hw_curves(STEEP_CURR_RATE, STEEP_A, STEEP_B, STEEP_SIG);
+    let (yield_curve, forward_curve) = STEEP_CURVE.curves();
     let legacy_cap = worst_price_err(1e-7, &yield_curve, &forward_curve, &times);
     let tight = worst_price_err(1e-14, &yield_curve, &forward_curve, &times);
     println!("tolerance 1e-7 worst price err {legacy_cap:e}; 1e-14 worst price err {tight:e}");

@@ -18,7 +18,7 @@ jobs:
           rust-version: nightly
 
       - name: benchmark
-        run: cargo bench | tee output.txt
+        run: cargo bench --features test-support | tee output.txt
 
       - name: Store benchmark result
         uses: rhysd/github-action-benchmark@v1

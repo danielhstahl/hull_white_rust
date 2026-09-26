@@ -4,28 +4,20 @@
 use approx::*;
 
 use crate::HullWhite;
+use crate::test_support::FLAT_5PCT;
 
 #[test]
 fn payer_swaption() {
-    let curr_rate = 0.05;
-    let sig: f64 = 0.01;
-    let a: f64 = 0.05;
-    let b = 0.05;
-    let delta = 0.25;
+    let fixture = FLAT_5PCT;
+    let curr_rate = fixture.curr_rate;
+    let delta = fixture.delta;
     let future_time = 0.0;
     //let swap_tenor = 5.0;
     let num_swap_payments = 20;
     let option_maturity = 1.0;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
@@ -62,25 +54,16 @@ fn payer_swaption() {
 
 #[test]
 fn receiver_swaption() {
-    let curr_rate = 0.05;
-    let sig: f64 = 0.01;
-    let a: f64 = 0.05;
-    let b = 0.05;
-    let delta = 0.25;
+    let fixture = FLAT_5PCT;
+    let curr_rate = fixture.curr_rate;
+    let delta = fixture.delta;
     let future_time = 0.0;
     //let swap_tenor = 5.0;
     let num_swap_payments = 20;
     let option_maturity = 1.0;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
@@ -117,25 +100,16 @@ fn receiver_swaption() {
 
 #[test]
 fn american_payer_swaption() {
-    let curr_rate = 0.05;
-    let sig: f64 = 0.01;
-    let a: f64 = 0.05;
-    let b = 0.05;
-    let delta = 0.25;
+    let fixture = FLAT_5PCT;
+    let curr_rate = fixture.curr_rate;
+    let delta = fixture.delta;
     let future_time = 0.0;
     //let swap_tenor = 5.0;
     let num_swap_payments = 20;
     let option_maturity = 1.0;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
@@ -172,25 +146,16 @@ fn american_payer_swaption() {
 
 #[test]
 fn american_receiver_swaption() {
-    let curr_rate = 0.05;
-    let sig: f64 = 0.01;
-    let a: f64 = 0.05;
-    let b = 0.05;
-    let delta = 0.25;
+    let fixture = FLAT_5PCT;
+    let curr_rate = fixture.curr_rate;
+    let delta = fixture.delta;
     let future_time = 0.0;
     //let swap_tenor = 5.0;
     let num_swap_payments = 20;
     let option_maturity = 1.0;
-    let yield_curve = |t: f64| {
-        let at = (1.0 - (-a * t).exp()) / a;
-        let ct = (b - sig.powi(2) / (2.0 * a.powi(2))) * (at - t) - (sig * at).powi(2) / (4.0 * a);
-        at * curr_rate - ct
-    };
-    let forward_curve = |t: f64| {
-        b + (-a * t).exp() * (curr_rate - b)
-            - (sig.powi(2) / (2.0 * a.powi(2))) * (1.0 - (-a * t).exp()).powi(2)
-    };
-    let hull_white = HullWhite::init(a, sig, &yield_curve, &forward_curve).unwrap();
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
     let swap_rate = hull_white
         .forward_swap_rate_t(
             curr_rate,
