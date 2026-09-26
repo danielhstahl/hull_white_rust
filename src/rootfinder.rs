@@ -18,7 +18,8 @@
 //! iterate can never leave the bracket.  Failure is therefore rare, and when it happens it carries
 //! the bracket, the iteration count and the residual instead of a bare number.
 
-use core::fmt;
+mod outcome;
+pub use outcome::{Solution, SolverError};
 
 /// Convergence target on the root, relative to its magnitude: the bracket is closed to
 /// `tolerance * max(1, |r|)`.  1e-12 on a rate is ~1e-8 basis points, which is far below any
@@ -74,12 +75,14 @@ const MAX_MODEL_ERROR_RATIO: f64 = 0.25;
 /// from `1e-4 * max(1, |seed|)` and doubling, this reaches ~1e116 before giving up.
 const MAX_EXPANSIONS: u32 = 400;
 
-/// Knobs for [`solve`], carried on the model so callers can tune the Jamshidian solve.
+/// Knobs for the critical-rate solve, carried on the model so callers can tune the Jamshidian
+/// solve.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolverSettings {
-    /// Convergence tolerance on the root, relative to its magnitude (see [`DEFAULT_TOLERANCE`]).
+    /// Convergence tolerance on the root, relative to its magnitude.
+    /// Defaults to `DEFAULT_TOLERANCE` (1e-12).
     pub tolerance: f64,
-    /// Hard cap on solver iterations (see [`DEFAULT_MAX_ITERATIONS`]).
+    /// Hard cap on solver iterations.  Defaults to `DEFAULT_MAX_ITERATIONS` (100).
     pub max_iterations: u32,
     /// Overrides the starting point.  `None` means "let the caller pass the seed", which for the
     /// Jamshidian solve is the model's own expected short rate at expiry.
@@ -113,73 +116,6 @@ impl SolverSettings {
         }
         Ok(())
     }
-}
-
-/// Why the solve did not produce a root.  Every variant says enough to tell a bracketing failure
-/// apart from a precision failure.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SolverError {
-    /// The bracket never straddled a sign change, however far it was widened.  Usually means the
-    /// objective cannot take both signs (so the instrument has no critical rate).
-    NoSignChange {
-        lower: f64,
-        upper: f64,
-        f_lower: f64,
-        f_upper: f64,
-    },
-    /// The objective (or its derivative) produced a NaN, so no ordering is possible.
-    NonFiniteEvaluation { point: f64, value: f64 },
-    /// Bracketed and converging, but the iteration cap was hit first.
-    Exhausted {
-        iterations: u32,
-        lower: f64,
-        upper: f64,
-        residual: f64,
-    },
-}
-
-impl fmt::Display for SolverError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SolverError::NoSignChange {
-                lower,
-                upper,
-                f_lower,
-                f_upper,
-            } => write!(
-                f,
-                "no sign change in [{lower}, {upper}] after {MAX_EXPANSIONS} widening steps \
-                 (f(lower) = {f_lower}, f(upper) = {f_upper}): the objective never crosses zero, so \
-                 there is no critical rate for this instrument"
-            ),
-            SolverError::NonFiniteEvaluation { point, value } => write!(
-                f,
-                "the objective produced {value} at {point}; cannot bracket a root around a NaN"
-            ),
-            SolverError::Exhausted {
-                iterations,
-                lower,
-                upper,
-                residual,
-            } => write!(
-                f,
-                "not converged in {iterations} iterations; bracket is [{lower}, {upper}] \
-                 (width {:.3e}) with residual {residual:.3e} — raise max_iterations or loosen the \
-                 tolerance",
-                (upper - lower).abs()
-            ),
-        }
-    }
-}
-
-impl std::error::Error for SolverError {}
-
-/// A converged root, with enough metadata that a caller can see how hard it was to get.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Solution {
-    pub root: f64,
-    pub iterations: u32,
-    pub residual: f64,
 }
 
 fn straddles(f_lower: f64, f_upper: f64) -> bool {
@@ -402,187 +338,4 @@ pub fn solve(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn settings(tolerance: f64, max_iterations: u32) -> SolverSettings {
-        SolverSettings {
-            tolerance,
-            max_iterations,
-            initial_guess: None,
-        }
-    }
-
-    #[test]
-    fn solves_a_simple_monotone_equation() {
-        //f(x) = 2x - 1, root at 0.5, no bracket offered.
-        let solution = solve(
-            &|x| 2.0 * x - 1.0,
-            &|_| 2.0,
-            None,
-            0.0,
-            &settings(1e-12, 100),
-        )
-        .unwrap();
-        assert!((solution.root - 0.5).abs() < 1e-12, "{solution:?}");
-    }
-
-    #[test]
-    fn a_seed_far_from_the_root_lands_on_the_same_answer() {
-        //f(x) = exp(-x) - 0.3, root at ln(1/0.3) = 1.2039728043259361
-        let expected = (1.0 / 0.3_f64).ln();
-        let f = |x: f64| (-x).exp() - 0.3;
-        let df = |x: f64| -(-x).exp();
-        for seed in [-5.0, 0.0, 40.0, 500.0] {
-            let solution = solve(&f, &df, None, seed, &settings(1e-12, 100)).unwrap();
-            assert!(
-                (solution.root - expected).abs() < 1e-10,
-                "seed {seed} gave {solution:?}, expected {expected}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_bracket_guard_stops_a_lying_derivative() {
-        //A derivative of the wrong sign would send a plain Newton iteration off to infinity; the
-        //bisection guard has to keep it on the root anyway.
-        let solution = solve(
-            &|x| x - 0.25,
-            &|_| -1.0, //deliberately wrong sign
-            Some((0.0, 1.0)),
-            0.9,
-            &settings(1e-12, 200),
-        )
-        .unwrap();
-        assert!((solution.root - 0.25).abs() < 1e-10, "{solution:?}");
-    }
-
-    #[test]
-    fn newton_cannot_crawl_an_exponential_tail() {
-        //f(x) = exp(-x) - 1e-6 has root x = ln(1e6) = 13.8155.  Deep in the tail the Newton step
-        //is exactly +1 per pass regardless of how far the root is, so an iteration that is merely
-        //"bracketed" still needs ~140 passes to cross a bracket this wide -- and a million for a
-        //strike this extreme in the real model.  The minimum-progress guard hands the long distance
-        //to bisection instead, which halves the bracket every pass.
-        let root = 1e6_f64.ln();
-        let f = |x: f64| (-x).exp() - 1e-6;
-        let df = |x: f64| -(-x).exp();
-        let solution = solve(&f, &df, None, -100.0, &settings(1e-12, 100)).unwrap();
-        assert!(
-            (solution.root - root).abs() < 1e-10,
-            "{solution:?} vs root {root}"
-        );
-        assert!(solution.iterations <= 70, "{solution:?}");
-    }
-
-    #[test]
-    fn a_bracket_that_does_not_straddle_is_widened_not_trusted() {
-        //The proposed bracket is entirely on the positive side of the root at -3.
-        let solution = solve(
-            &|x| x + 3.0,
-            &|_| 1.0,
-            Some((0.0, 1.0)),
-            0.5,
-            &settings(1e-12, 100),
-        )
-        .unwrap();
-        assert!((solution.root + 3.0).abs() < 1e-9, "{solution:?}");
-    }
-
-    #[test]
-    fn running_out_of_iterations_says_so_with_context() {
-        let error = solve(
-            &|x| (-x).exp() - 1e-6,
-            &|x| -(-x).exp(),
-            None,
-            0.0,
-            &settings(1e-14, 2),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(error, SolverError::Exhausted { iterations: 2, .. }),
-            "{error:?}"
-        );
-        let text = error.to_string();
-        assert!(text.contains("2 iterations"), "{text}");
-        assert!(text.contains("residual"), "{text}");
-    }
-
-    #[test]
-    fn a_never_straddling_objective_reports_no_sign_change() {
-        //Strictly positive: no root exists at any rate.
-        let error = solve(
-            &|x| x * x + 1.0,
-            &|x| 2.0 * x,
-            None,
-            0.0,
-            &settings(1e-12, 100),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(error, SolverError::NoSignChange { .. }),
-            "{error:?}"
-        );
-        assert!(error.to_string().contains("no sign change"), "{error}");
-    }
-
-    #[test]
-    fn a_nan_objective_is_reported_as_such() {
-        let error = solve(
-            &|x| if x > 0.0 { f64::NAN } else { x + 1.0 },
-            &|_| 1.0,
-            None,
-            0.0,
-            &settings(1e-12, 100),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(error, SolverError::NonFiniteEvaluation { .. }),
-            "{error:?}"
-        );
-    }
-
-    #[test]
-    fn an_exact_endpoint_or_seed_root_short_circuits() {
-        let settings = settings(1e-12, 100);
-        let solution = solve(&|x| x - 1.0, &|_| 1.0, Some((1.0, 2.0)), 5.0, &settings).unwrap();
-        assert_eq!(solution.root, 1.0);
-        assert_eq!(solution.iterations, 0);
-        let solution = solve(&|x| x - 7.0, &|_| 1.0, None, 7.0, &settings).unwrap();
-        assert_eq!(solution.root, 7.0);
-        assert_eq!(solution.iterations, 0);
-    }
-
-    #[test]
-    fn settings_are_validated_before_the_solve() {
-        assert!(settings(0.0, 10).validate().is_err());
-        assert!(settings(f64::NAN, 10).validate().is_err());
-        assert!(settings(1e-9, 0).validate().is_err());
-        assert!(
-            SolverSettings {
-                tolerance: 1e-9,
-                max_iterations: 10,
-                initial_guess: Some(f64::INFINITY),
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(settings(1e-9, 10).validate().is_ok());
-    }
-
-    #[test]
-    fn a_looser_tolerance_stops_looser() {
-        //A nonlinear objective, so the number of iterations actually depends on the tolerance:
-        //exp(x) = 2, root at ln 2.
-        let f = |x: f64| x.exp() - 2.0;
-        let df = |x: f64| x.exp();
-        let root = 2.0_f64.ln();
-        let loose = solve(&f, &df, Some((0.0, 2.0)), 0.0, &settings(1e-2, 100)).unwrap();
-        let tight = solve(&f, &df, Some((0.0, 2.0)), 0.0, &settings(1e-14, 100)).unwrap();
-        assert!(
-            (loose.root - root).abs() <= 1e-2 && (tight.root - root).abs() <= 1e-13,
-            "loose {loose:?} / tight {tight:?} vs root {root}"
-        );
-        assert!(loose.iterations < tight.iterations);
-    }
-}
+mod tests;

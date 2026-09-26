@@ -153,3 +153,6 @@ pub fn finish(what: &str, value: f64) -> Result<f64, HullWhiteError> {
         )))
     }
 }
+
+#[cfg(test)]
+mod tests;
