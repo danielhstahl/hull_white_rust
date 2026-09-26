@@ -115,7 +115,9 @@
 //! All public items are re-exported here, so `hull_white::HullWhite`, `hull_white::get_coupon_times`
 //! and the rest of the surface resolve from the crate root regardless of which module defines them.
 //! Each module keeps its tests in a sibling `tests.rs` (`src/bonds/tests.rs`, ...); the shared
-//! fixtures used across modules are in `testutil`, compiled under `cfg(test)`.
+//! fixtures used across modules are in `testutil`, compiled under `cfg(test)`.  Outside the crate,
+//! `tests/public_api.rs` walks the whole public surface the way a consumer does: that is the check
+//! that the split moved code without changing what `hull_white::` resolves to.
 
 pub mod error;
 mod rootfinder;

@@ -14,6 +14,12 @@ use crate::error::HullWhiteError;
 use crate::rootfinder::SolverSettings;
 use crate::validation;
 
+/// A one-factor Hull-White model, calibrated to an initial yield curve and an initial forward curve.
+///
+/// Built with [`HullWhite::init`]; the curves are borrowed, not owned, so a model is only good for
+/// as long as the closures it was calibrated to.  The struct carries the two model parameters
+/// (`a`, `sigma`) plus the root-finding budget used by the Jamshidian solve; see
+/// [`HullWhite::with_solver`].
 pub struct HullWhite<'a, T, U>
 where
     T: Fn(f64) -> f64 + std::marker::Sync,
