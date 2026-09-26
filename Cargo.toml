@@ -10,6 +10,20 @@ description = "Pricing functions assuming a Hull White short rate"
 edition = "2024"
 
 [features]
+# Heavy Monte-Carlo tests (`src/mc.rs` and the MC checks in `src/rates/tests.rs`).
+#
+# Off by default so plain `cargo test` stays a fraction of a second on the Monte-Carlo path: the
+# sample size and the Euler resolution come from `mc::scale()`, which is tiered on this feature.
+# With it on, each check runs ~20x the antithetic pairs on a 4x finer grid, which tightens the
+# `k * standard_error + discretisation residual` band from ~1e-4 to a few times 1e-5 and moves
+# the discretisation residual from "noise-dominated bound" to "measured".  CI runs both tiers
+# (see .github/workflows/test.yml); `--all-features` under coverage gets the heavy one for free.
+#
+#     cargo test                       # quick tier
+#     cargo test --features slow        # heavy tier
+#     cargo test --features slow -- --nocapture   # per-run error-budget report on stdout
+slow = []
+
 # Shared, internally-consistent curve fixtures (`hull_white::test_support`).
 #
 # Off by default and `#[doc(hidden)]`: this is not part of the crate's public surface.  Unit tests

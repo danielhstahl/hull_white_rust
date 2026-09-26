@@ -156,17 +156,25 @@
 //! | `validation` | the input contract every public entry point is checked against |
 //! | `rootfinder` | the bracketed, safeguarded scalar root solver |
 //! | `test_support` | *test / bench only, `#[doc(hidden)]`* — the shared HW-consistent yield and forward curves, and the named calibrations (`flat_5pct`, `steep_curve`, `low_vol`, ...) every test and bench prices off |
+//! | `mc` | *test only* — the Monte-Carlo harness: per-test seeds, antithetic variates, the one time-grid convention, and the `k * standard_error + discretisation bias` error budget every simulated price is asserted against |
 //!
 //! All public items are re-exported here, so `hull_white::HullWhite`, `hull_white::get_coupon_times`
 //! and the rest of the surface resolve from the crate root regardless of which module defines them.
 //! Each module keeps its tests in a sibling `tests.rs` (`src/bonds/tests.rs`, ...); the shared
 //! curve fixtures every module prices off live in `test_support`, compiled under `cfg(test)` and
 //! under the hidden `test-support` feature so `benches/` — a separate crate, which cannot see
-//! `cfg(test)` — builds against the same fixture rather than a copy of it.  Outside the crate,
+//! `cfg(test)` — builds against the same fixture rather than a copy of it.  The Monte-Carlo
+//! harness in `mc` is `cfg(test)` only, because it needs the `rand` dev-dependency, and its
+//! sample size is tiered on the `slow` feature so that plain `cargo test` stays quick; `src/mc.rs`
+//! documents what `--features slow` buys and how to run it.  Outside the crate,
 //! `tests/public_api.rs` walks the whole public surface the way a consumer does: that is the check
 //! that the split moved code without changing what `hull_white::` resolves to.
 
 pub mod error;
+// Monte-Carlo test harness (seeds, antithetic pairing, error budgets).  Test-only: it needs the
+// `rand` dev-dependency, so it is not reachable from a non-test build of the crate.
+#[cfg(test)]
+mod mc;
 mod rootfinder;
 pub use rootfinder::{Solution, SolverError, SolverSettings};
 #[cfg(test)]

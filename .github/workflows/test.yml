@@ -19,6 +19,16 @@ jobs:
       - name: Run tests stable
         if: matrix.rust == 'stable'
         run: cargo test --verbose
+      # Heavy Monte-Carlo tier.  The sample size and the Euler resolution of the MC checks in
+      # `src/rates/tests.rs` are tiered on the `slow` feature (see `src/mc.rs`), so plain
+      # `cargo test` above stays a few seconds while this step runs the tight end of the same
+      # error-budget curve: ~20x the antithetic pairs on a 4x finer grid, which tightens the
+      # `k * SE + discretisation residual` bands from ~1e-4 to a few times 1e-5.  `--nocapture` so the
+      # per-run budget reports land in the log.  The nightly coverage run below uses
+      # `--all-features`, which pulls in `slow` as well, so the heavy tier is exercised twice.
+      - name: Run heavy Monte-Carlo tests (slow feature)
+        if: matrix.rust == 'stable'
+        run: cargo test --verbose --features slow -- --nocapture
       - name: Install cargo-llvm-cov
         if: matrix.rust == 'nightly'
         uses: taiki-e/install-action@cargo-llvm-cov

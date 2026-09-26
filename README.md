@@ -28,3 +28,24 @@ Add the following package to your Cargo.toml:
 ## Benchmarks
 
 Benchmarks are at https://danielhstahl.github.io/hull_white_rust/dev/bench/.
+## Tests
+
+```bash
+cargo test                     # the whole suite; the Monte-Carlo checks run at the light tier (~0.2s)
+cargo test --features slow     # same checks at the heavy tier: ~20x the paths, ~4x finer grid (~18s)
+cargo test --features slow -- --nocapture   # print the per-run Monte-Carlo error-budget report
+```
+
+The Monte-Carlo checks (caplet, floorlet, Eurodollar future) do not assert against a hard-coded
+`epsilon`.  Each one asserts
+
+```text
+| mc - analytic |  <=  4 * standard_error  +  estimated discretisation residual
+```
+
+where the standard error is measured from the run itself (antithetic variates, so it is the spread
+of the pair averages) and the residual is the Richardson estimate from running the same estimator
+on two grids, `dt` and `dt / 2`.  The sample size and grid resolution are tiered on the `slow`
+feature so the tight end of that curve is opt-in: a plain `cargo test` keeps a ~4s signal, and CI
+runs `--features slow` as well (the nightly coverage run uses `--all-features`, which includes it).
+See `src/mc.rs` for the harness, the step-size convention, and the measured numbers.

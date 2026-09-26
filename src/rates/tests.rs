@@ -1,14 +1,30 @@
 //! Unit tests for the simple-rate instruments: `now`/`t` agreement for caplets and forward
-//! Libor, Monte-Carlo checks of a caplet and of the Eurodollar-futures convexity against
-//! the closed forms, and the cap/floor identities: caplet-floorlet parity, cap and floor summing
-//! their periods, and the Monte-Carlo check that the floorlet really is `delta * max(K - L, 0)`.
+//! Libor, the cap/floor identities (caplet-floorlet parity, a cap or floor summing its periods,
+//! the forward-strike coincidence, schedule validation), and the Monte-Carlo checks of a caplet,
+//! a floorlet and the Eurodollar-futures convexity against the closed forms.
+//!
+//! The Monte-Carlo checks go through [`crate::mc`]: a fixed seed per test, antithetic variates,
+//! one integer-step time-grid convention, and a tolerance computed as
+//! `k * standard_error + estimated discretisation residual` rather than a literal.  Sample size
+//! and grid resolution come from [`crate::mc::scale`], tiered on the `slow` feature: a plain
+//! `cargo test` runs the light tier (~0.25s for the three checks, bands of order `1e-4`) and
+//! `cargo test --features slow` runs the heavy one (~18s, bands ~4x tighter); CI runs both.
+//! The conventions, the measured variance reductions and the bias-study numbers are written up in
+//! [`crate::mc`].
 
 use approx::*;
-use rand::distributions::{Distribution, StandardNormal};
 
 use crate::HullWhite;
 use crate::error::HullWhiteError;
-use crate::test_support::{BASELINE, STEEP_CURVE, get_rng_seed};
+use crate::mc::{self, Estimate, Grid};
+use crate::test_support::{BASELINE, STEEP_CURVE};
+
+/// Seed slot for the caplet / floorlet path estimator.  One slot per test so the tests do not
+/// share a stretch of random numbers and cannot covary — see `mc::rng_for`.
+const SIMPLE_RATE_OPTION_SEED: u8 = 11;
+
+/// Seed slot for the Eurodollar-future estimator.
+const EURODOLLAR_SEED: u8 = 12;
 
 /// The two routes to a floorlet have to be the same number: the bond-call twin of the caplet's bond
 /// put, and the `t` form run at `(r(0), 0)`.
@@ -333,172 +349,242 @@ fn compare_libor() {
     assert_abs_diff_eq!(libor_n, libor_t, epsilon = 0.0001);
 }
 
-#[test]
-fn test_caplet() {
-    let fixture = BASELINE;
-    let curr_rate = fixture.curr_rate;
-    let future_time = 0.0;
-    let option_maturity = 1.5;
-    let strike = 0.02;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let delta = fixture.delta;
-    let seed: [u8; 32] = [2; 32];
-    let mut rng_seed = get_rng_seed(seed);
-    let normal = StandardNormal;
-    let num_sims: usize = 1000; //hopefully accurate
-    let num_discrete_steps: usize = 1000;
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
-    let total_sum = (0..num_sims).fold(0.0, |accum, _sample_index| {
-        let mut sum_r = 0.0;
-        let mut running_r = curr_rate;
-        let dt = (option_maturity - future_time) / (num_discrete_steps as f64 - 1.0);
-        (0..num_discrete_steps).for_each(|t_index| {
-            let norm = normal.sample(&mut rng_seed);
-            let curr_t = dt * (t_index as f64) + future_time;
-            let curr_vol = hull_white.variance_r(curr_t, curr_t + dt).unwrap().sqrt();
-            let curr_mu = hull_white.mu_r(running_r, curr_t, curr_t + dt).unwrap();
-            running_r = curr_mu + curr_vol * norm;
-            sum_r = sum_r + running_r * dt;
-        });
-        let libor_at_option_maturity = hull_white
-            .libor_rate_t(running_r, option_maturity, delta)
-            .unwrap();
-        //And some more steps since discounted in arrears
-        let more_steps = (delta / dt).floor() as usize;
-        let new_dt = delta / (more_steps as f64 - 1.0);
-        (1..more_steps).for_each(|t_index| {
-            let norm = normal.sample(&mut rng_seed);
-            let curr_t = new_dt * (t_index as f64) + option_maturity;
-            let curr_vol = hull_white
-                .variance_r(curr_t, curr_t + new_dt)
-                .unwrap()
-                .sqrt();
-            let curr_mu = hull_white.mu_r(running_r, curr_t, curr_t + new_dt).unwrap();
-            running_r = curr_mu + curr_vol * norm;
-            sum_r = sum_r + running_r * new_dt;
-        });
+// ---------------------------------------------------------------------------------------
+// Monte-Carlo checks against the closed forms.
+//
+// These use `crate::mc`: fixed per-test seeds, antithetic variates, a uniform integer-step time
+// grid, and a tolerance computed as `k * standard_error + estimated discretisation residual`
+// instead of a literal.  Size comes from `mc::scale()`, which is tiered on the `slow` feature:
+// plain `cargo test` runs a light tier (~0.25s for the three checks, bands of order 1e-4) and
+// `cargo test --features slow` runs the heavy one (~18s, bands ~4x tighter at a few times 1e-5);
+// CI runs both.  See `src/mc.rs` for the conventions and the measured numbers.
+// ---------------------------------------------------------------------------------------
 
-        if libor_at_option_maturity > strike {
-            accum + (libor_at_option_maturity - strike) * ((-sum_r).exp()) //discount
-        } else {
-            accum
-        }
-    });
-    let average_caplet = delta * (total_sum / (num_sims as f64));
-    let analytical_caplet = hull_white
-        .caplet_now(option_maturity, delta, strike)
-        .unwrap();
-    assert_abs_diff_eq!(average_caplet, analytical_caplet, epsilon = 0.0001);
-}
-
-#[test]
-fn test_edf() {
-    let fixture = BASELINE;
-    let curr_rate = fixture.curr_rate;
-    let future_time = 0.0;
-    let option_maturity = 1.5;
-    let (yield_curve, forward_curve) = fixture.curves();
-    let delta = fixture.delta;
-    let seed: [u8; 32] = [2; 32];
-    let mut rng_seed = get_rng_seed(seed);
-    let normal = StandardNormal;
-    let num_sims: usize = 1000000; //hopefully accurate
-    let hull_white =
-        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
-    let mu = hull_white
-        .mu_r(curr_rate, future_time, option_maturity)
-        .unwrap();
-    let vol = hull_white
-        .variance_r(future_time, option_maturity)
-        .unwrap()
-        .sqrt();
-    let total_sum = (0..num_sims).fold(0.0, |accum, _sample_index| {
-        let norm = normal.sample(&mut rng_seed);
-        let final_r = mu + vol * norm;
-        let final_bond = hull_white
-            .bond_price_t(final_r, option_maturity, option_maturity + delta)
-            .unwrap();
-        accum + 1.0 / final_bond
-    });
-    let average_edf = ((total_sum / (num_sims as f64)) - 1.0) / delta;
-
-    let analytical_edf = hull_white
-        .euro_dollar_future_t(curr_rate, future_time, option_maturity, delta)
-        .unwrap();
-    assert_abs_diff_eq!(average_edf, analytical_edf, epsilon = 0.0001);
-}
-
-/// Monte-Carlo check of the floorlet against the closed form, mirroring `test_caplet`.  The
-/// simulated payoff is `delta * max(strike - Libor, 0)` discounted along the sampled short-rate
-/// path, which is the orientation the bond-call twin in `floorlet_now` is supposed to reproduce.
+/// One period of a cap or a floor, described the way the Monte-Carlo simulates it rather than the
+/// way the closed form is written.
 ///
-/// The strike sits well above the forward here, so the floor carries the value and the caplet on the
-/// same period is worth about a twentieth as much: a pricer that had the cap and floor payoff
-/// orientations swapped could not produce that asymmetry, and would also fail the parity check in
+/// The simulated claim is the *arrears* one: `delta * (L_T - K)^+` (or `(K - L_T)^+`) paid at
+/// `T + delta`, discounted by the sampled `exp(-integral r ds)` over `[0, T + delta]`.  That is
+/// a genuinely independent route to the closed form's number, which arrives through the
+/// deposit-bond identity instead:
+///
+/// ```text
+///   E[ exp(-int_0^{T+delta} r) * delta * (L_T - K)^+ ]
+/// = E[ exp(-int_0^T r) * P(T, T+delta) * delta * (L_T - K)^+ ]   tower, P(T,T+d) = E[e^-int | F_T]
+/// = E[ exp(-int_0^T r) * (1 - (1 + delta*K) * P(T, T+delta))^+ ]  since delta*L_T = 1/B_T - 1
+/// = (1 + delta*K) * put_on_B(P(., T+delta); K' = 1/(1 + delta*K)) = caplet_now
+/// ```
+///
+/// with the call standing in for the put, and the sign flipped, for the floorlet.  Putting the
+/// payoff direction in a field means the caplet and the floorlet walk exactly the same path and
+/// cannot drift apart in convention.
+struct ArrearsOption {
+    /// The short rate the simulated path starts from.
+    start_rate: f64,
+    /// `T`: the fixing date, which is also the option's expiry.
+    option_maturity: f64,
+    /// The accrual period: the claim fixes over `[T, T + delta]` and pays at `T + delta`.
+    delta: f64,
+    strike: f64,
+    /// `true` for a caplet (`(L - K)^+`), `false` for a floorlet (`(K - L)^+`).
+    cap: bool,
+}
+
+impl ArrearsOption {
+    /// The two legs of this instrument's life, from the valuation date to the fixing and from the
+    /// fixing to the payment date, each stepped uniformly at `steps_per_year`
+    /// ([`Grid::for_legs`], which never resolves a coarser `dt` than asked for).
+    fn legs(&self, valuation_time: f64, steps_per_year: usize) -> Grid {
+        Grid::for_legs(
+            valuation_time,
+            &[self.option_maturity, self.option_maturity + self.delta],
+            steps_per_year,
+        )
+    }
+
+    /// This path's discounted payoff: the fixing read off the rate *at* the expiry date, the
+    /// period's simple-rate payoff, discounted by this path's own short-rate integral to the
+    /// payment date.
+    fn payoff(
+        &self,
+        hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+        state: &mc::PathState,
+    ) -> f64 {
+        //The rate at the end of the first leg is the rate at the fixing date — not one step past
+        //it, which is what the old `dt = span / (n - 1)` convention did.
+        let fixing_rate = state.rate_at_end_of_leg(0);
+        let fixing = hull_white
+            .libor_rate_t(fixing_rate, self.option_maturity, self.delta)
+            .unwrap();
+        let payoff = if self.cap {
+            self.delta * (fixing - self.strike).max(0.0)
+        } else {
+            self.delta * (self.strike - fixing).max(0.0)
+        };
+        payoff * (-state.integral).exp()
+    }
+
+    /// The closed form this estimator is checked against.
+    fn analytic(
+        &self,
+        hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    ) -> f64 {
+        if self.cap {
+            hull_white
+                .caplet_now(self.option_maturity, self.delta, self.strike)
+                .unwrap()
+        } else {
+            hull_white
+                .floorlet_now(self.option_maturity, self.delta, self.strike)
+                .unwrap()
+        }
+    }
+}
+
+/// Simulate the arrears option on `grid` with antithetic pairs.
+fn simulate(
+    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    option: &ArrearsOption,
+    grid: &Grid,
+    pairs: usize,
+) -> Estimate {
+    mc::run_paths(
+        hull_white,
+        mc::rng_for(SIMPLE_RATE_OPTION_SEED),
+        grid,
+        option.start_rate,
+        pairs,
+        |state: &mc::PathState| option.payoff(hull_white, state),
+    )
+}
+
+/// The whole caplet/floorlet check: coarse grid, fine grid at exactly half the step size, the
+/// Richardson residual from those two, and the `k * SE + residual` assertion — plus the report on
+/// stdout, which is what `--nocapture` is for.
+fn assert_arrears_option_within_budget(
+    label: &str,
+    hull_white: &HullWhite<impl Fn(f64) -> f64 + Sync, impl Fn(f64) -> f64 + Sync>,
+    option: &ArrearsOption,
+) -> Estimate {
+    let scale = mc::scale();
+    let coarse = option.legs(0.0, scale.steps_per_year / 2);
+    let fine = coarse.refined(2);
+    let coarse_estimate = simulate(hull_white, option, &coarse, scale.pairs);
+    let fine_estimate = simulate(hull_white, option, &fine, scale.pairs);
+    //Refined by an exact factor of 2 on every leg, so the Richardson factor is exactly 2 rather
+    //than something that fell out of how each leg happened to round.
+    let ratio = coarse.step_ratio(&fine);
+    let bias = mc::discretisation_bias(&coarse_estimate, &fine_estimate, ratio);
+    mc::Check::with_bias_study(label, fine_estimate, option.analytic(hull_white), bias)
+        .assert_within_budget();
+    //The variance reduction has to actually be there.  If it ever comes out at ~1 the pairing is
+    //not doing its job, and the tight heavy-tier bands would be resting on nothing.
+    assert!(
+        fine_estimate.variance_reduction > 1.2,
+        "{label}: antithetic pairing bought only {:.2}x",
+        fine_estimate.variance_reduction
+    );
+    fine_estimate
+}
+
+/// Monte-Carlo caplet vs the closed form, with the error budget stated rather than asserted.
+#[test]
+fn monte_carlo_caplet_matches_the_closed_form() {
+    let fixture = BASELINE;
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    assert_arrears_option_within_budget(
+        "caplet(T=1.5, K=0.02) simulated arrears, antithetic, fine dt = 1/steps_per_year",
+        &hull_white,
+        &ArrearsOption {
+            start_rate: fixture.curr_rate,
+            option_maturity: 1.5,
+            delta: fixture.delta,
+            strike: 0.02,
+            cap: true,
+        },
+    );
+}
+
+/// Monte-Carlo floorlet vs the closed form.  The strike sits well above the forward, so the floor
+/// carries the value and the caplet on the same period is worth a fraction of it: a pricer with the
+/// cap and floor orientations swapped could not reproduce that asymmetry, and would also fail
 /// `cap_floor_parity_is_the_forward_leg` in the other direction.
 #[test]
-fn test_floorlet() {
+fn monte_carlo_floorlet_matches_the_closed_form() {
     let fixture = BASELINE;
-    let curr_rate = fixture.curr_rate;
-    let future_time = 0.0;
-    let option_maturity = 1.5;
-    let strike = 0.05;
     let (yield_curve, forward_curve) = fixture.curves();
-    let delta = 0.25;
-    let seed: [u8; 32] = [2; 32];
-    let mut rng_seed = get_rng_seed(seed);
-    let normal = StandardNormal;
-    let num_sims: usize = 1000; //hopefully accurate
-    let num_discrete_steps: usize = 1000;
     let hull_white =
         HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
-    let total_sum = (0..num_sims).fold(0.0, |accum, _sample_index| {
-        let mut sum_r = 0.0;
-        let mut running_r = curr_rate;
-        let dt = (option_maturity - future_time) / (num_discrete_steps as f64 - 1.0);
-        (0..num_discrete_steps).for_each(|t_index| {
-            let norm = normal.sample(&mut rng_seed);
-            let curr_t = dt * (t_index as f64) + future_time;
-            let curr_vol = hull_white.variance_r(curr_t, curr_t + dt).unwrap().sqrt();
-            let curr_mu = hull_white.mu_r(running_r, curr_t, curr_t + dt).unwrap();
-            running_r = curr_mu + curr_vol * norm;
-            sum_r += running_r * dt;
-        });
-        let libor_at_option_maturity = hull_white
-            .libor_rate_t(running_r, option_maturity, delta)
-            .unwrap();
-        //And some more steps since discounted in arrears
-        let more_steps = (delta / dt).floor() as usize;
-        let new_dt = delta / (more_steps as f64 - 1.0);
-        (1..more_steps).for_each(|t_index| {
-            let norm = normal.sample(&mut rng_seed);
-            let curr_t = new_dt * (t_index as f64) + option_maturity;
-            let curr_vol = hull_white
-                .variance_r(curr_t, curr_t + new_dt)
-                .unwrap()
-                .sqrt();
-            let curr_mu = hull_white.mu_r(running_r, curr_t, curr_t + new_dt).unwrap();
-            running_r = curr_mu + curr_vol * norm;
-            sum_r += running_r * new_dt;
-        });
-
-        if libor_at_option_maturity < strike {
-            accum + (strike - libor_at_option_maturity) * ((-sum_r).exp()) //discount
-        } else {
-            accum
-        }
-    });
-    let average_floorlet = delta * (total_sum / (num_sims as f64));
-    let analytical_floorlet = hull_white
-        .floorlet_now(option_maturity, delta, strike)
-        .unwrap();
-    let analytical_caplet = hull_white
-        .caplet_now(option_maturity, delta, strike)
-        .unwrap();
-    assert_abs_diff_eq!(average_floorlet, analytical_floorlet, epsilon = 0.0001);
+    let strike = 0.05;
+    assert_arrears_option_within_budget(
+        "floorlet(T=1.5, K=0.05) simulated arrears, antithetic, fine dt = 1/steps_per_year",
+        &hull_white,
+        &ArrearsOption {
+            start_rate: fixture.curr_rate,
+            option_maturity: 1.5,
+            delta: fixture.delta,
+            strike,
+            cap: false,
+        },
+    );
+    let caplet = hull_white.caplet_now(1.5, fixture.delta, strike).unwrap();
+    let floorlet = hull_white.floorlet_now(1.5, fixture.delta, strike).unwrap();
     assert!(
-        analytical_floorlet > 10.0 * analytical_caplet,
-        "floor {analytical_floorlet} vs cap {analytical_caplet} at a strike far above the forward"
+        floorlet > 10.0 * caplet,
+        "floor {floorlet} vs cap {caplet} at a strike far above the forward"
+    );
+}
+
+/// Monte-Carlo check of the Eurodollar-future convexity against the closed form.
+///
+/// Unlike the caplet and floorlet checks this estimator has **no** discretisation at all: the
+/// terminal rate is drawn from its exact conditional distribution `N(mu_r, var_r)` over
+/// `[0, T]`, and the futures is a deterministic function of that one draw
+/// (`(E[1 / B(T, T + delta)] - 1) / delta`), so there is no time step whose coarseness could
+/// bias the answer.  The budget is therefore sampling error and nothing else — `k * SE`, with the
+/// bias term declared as [`mc::NO_DISCRETISATION`] rather than quietly left out.
+///
+/// Because each path costs a single normal draw rather than hundreds of steps, the same wall-clock
+/// budget buys about ten times as many pairs as the path estimators get, so this test runs at
+/// `10 x scale().pairs` and lands on a tighter band than the caplet check for less time.
+#[test]
+fn monte_carlo_euro_dollar_future_matches_the_closed_form() {
+    let fixture = BASELINE;
+    let (yield_curve, forward_curve) = fixture.curves();
+    let hull_white =
+        HullWhite::init(fixture.a, fixture.sigma, &yield_curve, &forward_curve).unwrap();
+    let option_maturity = 1.5;
+    let delta = fixture.delta;
+    let mu = hull_white
+        .mu_r(fixture.curr_rate, 0.0, option_maturity)
+        .unwrap();
+    let vol = hull_white.variance_r(0.0, option_maturity).unwrap().sqrt();
+    let pairs = mc::scale().pairs * 10;
+    let estimate = mc::run(mc::rng_for(EURODOLLAR_SEED), 1, pairs, |normals| {
+        let rate = mu + vol * normals[0];
+        1.0 / hull_white
+            .bond_price_t(rate, option_maturity, option_maturity + delta)
+            .unwrap()
+    })
+    .rescale(1.0 / delta, -1.0 / delta);
+    let analytic = hull_white
+        .euro_dollar_future_t(fixture.curr_rate, 0.0, option_maturity, delta)
+        .unwrap();
+    mc::Check::undiscretised(
+        "Eurodollar future(T=1.5, exact terminal draw, antithetic, no time stepping)",
+        estimate,
+        analytic,
+    )
+    .assert_within_budget();
+    //The convexity itself: the future sits above the forward it quotes against, and only because of
+    //volatility.  A zero-variance limit collapses the two together.
+    let forward = hull_white
+        .forward_libor_rate_now(option_maturity, delta)
+        .unwrap();
+    assert!(
+        analytic > forward,
+        "future {analytic} should exceed the forward {forward} by the convexity term"
     );
 }

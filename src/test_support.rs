@@ -48,13 +48,6 @@
 //! and cannot see `cfg(test)` items.  It is `#[doc(hidden)]`: it is not part of the public
 //! surface of this crate.
 
-// `rand` is a dev-dependency, so it is linked for `cfg(test)` builds and for benches, but not for
-// a plain `--features test-support` build.  Everything that touches it is gated accordingly.
-#[cfg(test)]
-use rand::SeedableRng;
-#[cfg(test)]
-use rand::StdRng;
-
 /// The Hull-White-consistent `(yield_curve, forward_curve)` pair for one calibration.
 ///
 /// This is the whole fixture maths, and the only place it appears:
@@ -245,11 +238,6 @@ pub const ALL_SCENARIOS: [Scenario; 7] = [
     QUICK_REVERSION,
     LOW_VOL,
 ];
-
-#[cfg(test)]
-pub(crate) fn get_rng_seed(seed: [u8; 32]) -> StdRng {
-    SeedableRng::from_seed(seed)
-}
 
 /// Set `model` up on a named scenario.
 ///
