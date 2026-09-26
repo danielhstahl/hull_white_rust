@@ -291,6 +291,58 @@ fn seeds_are_reproducible_and_slots_are_independent() {
     assert_ne!(draw(2), draw(3), "and neighbouring slots must not either");
 }
 
+/// The increments themselves really are standard normal: mean `0`, variance `1`, each at four
+/// standard errors of that moment's own estimate.
+///
+/// Worth having next to the seed test because it covers the failure the price checks cannot.  Every
+/// instrument-level band is sized from the dispersion the run just measured, so a draw stream that
+/// is *not* the model's `N(0, 1)` — a distribution swapped in at an import site, a `Normal`
+/// built with a variance of 2, a `sample` call wired to the wrong generator — would not show up
+/// as a blown band on some price.  It would show up as every band being self-consistently wrong,
+/// with each simulated price drifting from its closed form by an amount the reported SE happily
+/// absorbs.  This is the one place the primitive is checked rather than the estimator built on it.
+///
+/// For a unit-normal sample, `SE(mean) = 1 / sqrt(N)` and `SE(var) = sqrt(2 / N)` (the variance
+/// estimate's own standard error, `sqrt((kurtosis - 1) / N)` at kurtosis 3).  Four of each is
+/// the same `k` the price checks run at, so each moment is a ~1-in-15,000 event under the null
+/// that the draws are what they claim to be.  Measured here, at `N = 200_000` on slot 4: `mean
+/// = -1.4e-3` and `variance = 1.0055`, against tolerances of `8.9e-3` and `1.3e-2`
+/// respectively — each moment using about an eighth of the band it is given.
+#[test]
+fn the_increment_draws_are_standard_normal() {
+    const N: usize = 200_000;
+    //A dedicated slot: nothing else in the crate draws from these numbers, so the moments below are
+    //a fixed function of this test, reproducible run to run.
+    let mut rng = rng_for(4);
+    let normal = StandardNormal;
+    //Online (Welford) moments, so the check does not hold 200k draws alive.
+    let mut mean = 0.0;
+    let mut m2 = 0.0;
+    for i in 1..=N {
+        let z: f64 = normal.sample(&mut rng);
+        assert!(z.is_finite(), "draw {i} of {N} was not finite: {z}");
+        let delta = z - mean;
+        mean += delta / i as f64;
+        m2 += delta * (z - mean);
+    }
+    let variance = m2 / (N - 1) as f64;
+    let se_mean = 1.0 / (N as f64).sqrt();
+    let se_variance = (2.0 / N as f64).sqrt();
+
+    assert!(
+        mean.abs() <= K_SIGMA * se_mean,
+        "mean {mean:+.5} is more than {K_SIGMA} SE ({:.5}) from 0: the draws are not centred",
+        K_SIGMA * se_mean,
+    );
+    assert!(
+        (variance - 1.0).abs() <= K_SIGMA * se_variance,
+        "variance {variance:.5} is more than {K_SIGMA} SE ({:.5}) from 1: the draws are not unit \
+         scale (a std-dev of {} would produce this)",
+        K_SIGMA * se_variance,
+        variance.sqrt(),
+    );
+}
+
 /// With zero noise the simulated path is the model's own mean path, which makes the walk checkable
 /// exactly: the rate at each leg boundary is the chained conditional mean *at that date* (not one
 /// step past it, which is the bug the grid convention exists to prevent), and splitting a span into

@@ -33,12 +33,14 @@ slow = []
 test-support = []
 
 [dependencies]
-black_scholes = "0.11.0"
+black_scholes = "0.11.1"
 binomial_tree = "0.5.0"
 
 [dev-dependencies]
-approx = "0.2.0"
-rand = "0.5"
+approx = "0.5.1"
+# `rand` alone gives the RNGs; the normal draws come from `rand_distr` (see `src/mc.rs`).
+rand = "0.9"
+rand_distr = "0.5"
 # A/B harness (`src/solver_ab.rs`) still needs the solver this crate replaced.
 nrfind = "1.0.3"
 

@@ -99,15 +99,22 @@
 //! table below is a couple of parts in `1e-5` on a price rather than the much larger number a
 //! hand-rolled `r += a(b - r)dt + sigma sqrt(dt) z` Euler loop produces at the same `dt`.
 //!
-//! Measured, at the heavy tier (fine `dt = 1/400`, coarse `dt = 1/200`, 30,000 antithetic
-//! pairs, `BASELINE`, `T = 1.5`, `delta = 0.25`):
+//! Measured, at the heavy tier (fine `dt = 1/400`, coarse `dt = 1/200`, `BASELINE`,
+//! `T = 1.5`, `delta = 0.25`; 30,000 antithetic pairs for the two path checks, `10 x` that for
+//! the Eurodollar check).  Re-measured after the `rand` 0.5 -> 0.9 bump, which replaced the
+//! whole draw stream (`ChaCha20` in `rand 0.5` -> `ChaCha12` in `rand_chacha 0.9`, normals
+//! from `rand_distr::StandardNormal` instead of `rand::distributions::StandardNormal`) and not
+//! one tolerance: every number below is printed by the run it describes.
 //!
 //! ```text
 //! instrument     |mc - analytic|   k * SE      residual     budget     budget used
-//! caplet          4.3e-6          2.7e-5      9.7e-6       3.7e-5     11.5%
-//! floorlet        1.0e-6          1.8e-5      6.4e-6       2.5e-5      4.0%
-//! EDF (exact)     1.6e-7          4.8e-7      0            4.8e-7     32.4%
+//! caplet          3.7e-6          2.7e-5      9.7e-6       3.7e-5      9.9%
+//! floorlet        8.1e-7          1.8e-5      6.5e-6       2.5e-5      3.3%
+//! EDF (exact)     1.9e-7          4.8e-7      0            4.8e-7     40.4%
 //! ```
+//!
+//! That the same bands absorb a completely different stream — same orders of magnitude, same
+//! residuals, nothing retuned — is the property this harness exists to provide.
 //!
 //! The two path-based checks use roughly a tenth of their budget; the discretisation residual is a
 //! quarter to a third of the budget, which is the sign that the grid is fine enough that sampling
@@ -170,8 +177,8 @@
 //! wall clock, for a tolerance no tighter than the quick tier's.
 
 use rand::SeedableRng;
-use rand::StdRng;
-use rand::distributions::{Distribution, StandardNormal};
+use rand::rngs::StdRng;
+use rand_distr::{Distribution, StandardNormal};
 
 use crate::HullWhite;
 
