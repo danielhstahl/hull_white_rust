@@ -35,7 +35,7 @@ jobs:
       # whoever moves them changes this workflow without a PR here.
       #   actions/checkout                          11d5960  v4.4.0
       #   hecrj/setup-rust-action                   110f367  v2.0.1
-      #   benchmark-action/github-action-benchmark  fd31771  v1.9.0
+      #   benchmark-action/github-action-benchmark  4322e57  v1.22.2
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
         with:
@@ -45,9 +45,11 @@ jobs:
         run: cargo bench --features test-support | tee output.txt
 
       - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c # v1.9.0
+        uses: benchmark-action/github-action-benchmark@4322e5726e6334590d251fc4f92bec0efafc45dc # v1.22.2
         with:
           tool: "cargo"
           output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
+          # Workflow will fail when an alert happens
+          fail-on-alert: true
