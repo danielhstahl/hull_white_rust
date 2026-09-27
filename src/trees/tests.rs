@@ -92,8 +92,21 @@ fn european_swaption_tree_matches_analytic_when_t_is_zero() {
 /// time-coordinate fix must leave every one of them bit-identical -- pinning bits rather than a
 /// tolerance means a real behaviour change at `t = 0` cannot slip through unnoticed, and cannot
 /// be "absorbed" by widening an epsilon later.
+///
+/// **Re-pinned** when the swap leg's fixed-coupon sum became the shared annuity kernel
+/// (`swaps::annuity_t`).  The old body folded `K * delta * P_i` term by term over `1..n` and paid
+/// a combined `(1 + K * delta)` at the `n`-th date; the new one folds `P_i` over `1..=n`, scales
+/// the sum once by `K`, and carries the principal as its own term.  Same number in exact
+/// arithmetic -- `annuity_t` documents the identity -- differing only in the order f64 adds it, so
+/// every tree price here moved 4-10 ulps: worst measured `|delta| = 4.4e-16`, worst relative
+/// `3.7e-11`, and that last only on a one-period swap priced so near its own zero that
+/// cancellation does the amplifying (the same change turned 314 near-zero swap prices on the
+/// measured grid into *exactly* `0.0`).  The pin is as strict as it always was; only its
+/// reference moved, for a rounding identity rather than a behaviour change -- and
+/// [`swaption_tree_at_t_is_within_its_documented_reassociation_slack_of_0_9_0`] keeps that claim
+/// checked against the 0.9.0 numbers instead of left as prose.
 #[test]
-fn swaption_tree_at_t_is_bit_identical_to_pre_fix() {
+fn swaption_tree_at_t_is_bit_identical_to_pinned_values() {
     let option_maturity = 1.5;
     let num_swap_payments = 20;
     let delta = 0.25;
@@ -121,10 +134,10 @@ fn swaption_tree_at_t_is_bit_identical_to_pre_fix() {
             a: 0.05,
             b: 0.05,
             sig: 0.01,
-            eur_payer: 0.017330477644662997,
-            eur_receiver: 0.017329771203617984,
-            amer_payer: 0.01834265355592532,
-            amer_receiver: 0.017797483448434452,
+            eur_payer: 0.017330477644662973,
+            eur_receiver: 0.01732977120361801,
+            amer_payer: 0.018342653555925285,
+            amer_receiver: 0.017797483448434476,
         },
         GoldenRow {
             name: "steep",
@@ -132,10 +145,10 @@ fn swaption_tree_at_t_is_bit_identical_to_pre_fix() {
             a: 0.2,
             b: 0.06,
             sig: 0.03,
-            eur_payer: 0.03597512274296273,
-            eur_receiver: 0.03597334589011368,
-            amer_payer: 0.03781406402902323,
-            amer_receiver: 0.04452822113093644,
+            eur_payer: 0.03597512274296276,
+            eur_receiver: 0.03597334589011365,
+            amer_payer: 0.03781406402902327,
+            amer_receiver: 0.044528221130936387,
         },
     ];
     for row in &golden {
@@ -215,6 +228,136 @@ fn swaption_tree_at_t_is_bit_identical_to_pre_fix() {
             amer_r,
             &format!("{name} american receiver"),
         );
+    }
+}
+
+/// The same two fixtures priced against their **0.9.0** values, with the distance bounded in ulps.
+///
+/// [`swaption_tree_at_t_is_bit_identical_to_pinned_values`] pins the present; this pins how far the
+/// present may sit from the release.  The only difference between the two numbers is the order the
+/// swap leg's coupons get added in (`swaps::annuity_t` carries the identity), which measured 4-10
+/// ulps on these eight values.  `SLACK_ULPS = 16` bounds that with room, so a change that moves a
+/// tree price further from 0.9.0 than a reassociation can has to explain itself here instead of
+/// quietly becoming the new normal.  A slack on the historical distance, not a tolerance on price:
+/// the exact pin above stays the strict check.
+#[test]
+fn swaption_tree_at_t_is_within_its_documented_reassociation_slack_of_0_9_0() {
+    /// The four tree prices one fixture has, in a fixed order, so nothing lines up with its
+    /// neighbour by accident.
+    const INSTRUMENTS: [&str; 4] = [
+        "european payer",
+        "european receiver",
+        "american payer",
+        "american receiver",
+    ];
+    /// One fixture: its calibration, and the [`INSTRUMENTS`] prices as of 0.9.0.
+    struct Pre090 {
+        name: &'static str,
+        r0: f64,
+        a: f64,
+        b: f64,
+        sig: f64,
+        prices: [f64; 4],
+    }
+    const SLACK_ULPS: i128 = 16;
+    let v090 = [
+        Pre090 {
+            name: "legacy",
+            r0: 0.05,
+            a: 0.05,
+            b: 0.05,
+            sig: 0.01,
+            prices: [
+                0.017330477644662997,
+                0.017329771203617984,
+                0.01834265355592532,
+                0.017797483448434452,
+            ],
+        },
+        Pre090 {
+            name: "steep",
+            r0: 0.02,
+            a: 0.2,
+            b: 0.06,
+            sig: 0.03,
+            prices: [
+                0.03597512274296273,
+                0.03597334589011368,
+                0.03781406402902323,
+                0.04452822113093644,
+            ],
+        },
+    ];
+    let option_maturity = 1.5;
+    let num_swap_payments = 20;
+    let delta = 0.25;
+    let steps = 400;
+    for row in &v090 {
+        let curve = hw_curve(row.r0, row.a, row.b, row.sig);
+        let hull_white = HullWhite::new(row.a, row.sig, &curve).unwrap();
+        let swap_rate = hull_white
+            .forward_swap_rate_t(row.r0, 0.0, option_maturity, num_swap_payments, delta)
+            .unwrap();
+        let current = [
+            hull_white
+                .european_payer_swaption_tree(
+                    row.r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                )
+                .unwrap(),
+            hull_white
+                .european_receiver_swaption_tree(
+                    row.r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                )
+                .unwrap(),
+            hull_white
+                .american_payer_swaption_t(
+                    row.r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                )
+                .unwrap(),
+            hull_white
+                .american_receiver_swaption_t(
+                    row.r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                )
+                .unwrap(),
+        ];
+        for (index, label) in INSTRUMENTS.iter().enumerate() {
+            let now = current[index];
+            let then = row.prices[index];
+            //Both numbers are positive and of the same order, so the distance between their bit
+            //patterns is the ulp count.
+            let ulps = (now.to_bits() as i128 - then.to_bits() as i128).abs();
+            assert!(
+                ulps <= SLACK_ULPS,
+                "{} {label} tree at t = 0 is {ulps} ulps from its 0.9.0 value \
+                 (now {now:.20}, 0.9.0 {then:.20}); the swap-leg reassociation is documented \
+                 at <= {SLACK_ULPS}",
+                row.name
+            );
+        }
     }
 }
 

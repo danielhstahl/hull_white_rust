@@ -171,8 +171,8 @@ impl<'a> HullWhite<'a> {
     ///
     /// Upstream, `compute_price_american` *is* `compute_price_raw(..., true)`, so routing both
     /// sides through the one engine leaves the American numbers bit-identical to what they were
-    /// before the two copies were folded; `swaption_tree_at_t_is_bit_identical_to_pre_fix` pins
-    /// that with bits rather than with a tolerance.
+    /// before the two copies were folded; `swaption_tree_at_t_is_bit_identical_to_pinned_values`
+    /// pins that with bits rather than with a tolerance.
     ///
     /// The caller validates (see [`validate_swaption`]); this is the kernel and does not re-check
     /// its arguments.

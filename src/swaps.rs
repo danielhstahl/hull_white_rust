@@ -1,5 +1,11 @@
 //! Vanilla swaps: forward swap rate, swap price, and the European (analytic) swaptions.
 //!
+//! The payment convention every price here is built on — `n` coupon dates, `start + delta` through
+//! `start + n * delta`, with the principal riding on the last of them, so `swap_maturity` *is*
+//! that last date — is stated once, on the module-private `annuity_t` that both
+//! [`HullWhite::forward_swap_rate_t`] and [`HullWhite::swap_price_t_init`] call, with the worked
+//! example and the algebra that shows the two consumers agree.
+//!
 //! A swap is priced as the difference of two bond legs — the fixed leg is a coupon bond, the
 //! floating leg par at reset — so `swap_price_t(swap_rate)` is zero exactly at the forward swap
 //! rate.  [`HullWhite::swap_price_t`] derives the remaining-payment anchor from the maturity
@@ -15,6 +21,88 @@ use crate::schedules::{get_coupon_times, get_num_remaining_payments};
 use crate::validation;
 
 impl<'a> HullWhite<'a> {
+    /// The annuity of a swap's remaining payments:
+    ///
+    /// ```text
+    /// A(t) = delta * sum_{i=1..n} P(t, start + i * delta)
+    /// ```
+    ///
+    /// where `P` is [`HullWhite::bond_price_t_raw`].  Both things this module prices are read off
+    /// this one sum — the forward rate is `(P(t, start) - P(t, start + n*delta)) / A(t)` and the
+    /// swap price is `P(t, start) - K * A(t) - P(t, start + n*delta)` — and those two only agree
+    /// with each other if the schedule behind the sum is counted the same way in both.  So the
+    /// payment convention lives here, once, rather than being implicit in two hand-rolled loops.
+    ///
+    /// # The payment convention
+    ///
+    /// A schedule is three numbers: `start` (when the swap begins and the floating leg resets to
+    /// par), `delta` (one payment period) and `n` (the caller's `num_swap_payments`, how many
+    /// coupons are left).  They generate the `n` payment dates
+    /// `start + delta, start + 2*delta, ..., start + n*delta`, and on those dates:
+    ///
+    /// * **every one of the `n` dates carries a coupon** — `K * delta` on the fixed leg, the
+    ///   period's reset Libor times `delta` on the floating leg;
+    /// * **the principal — 1.0 of notional — is carried by the last of those same `n` dates**,
+    ///   together with that date's coupon.  Exchanging principal does not append a date.
+    ///
+    /// Worked example: `start = 1.0`, `delta = 0.25`, `n = 4` (quarterly, starting in a year):
+    ///
+    /// ```text
+    /// i                  1        2        3        4
+    /// date              1.25     1.50     1.75  2.00  = swap_maturity
+    /// coupon            K*d      K*d      K*d     K*d
+    /// principal         --       --       --      + 1.00
+    /// fixed cash flow   K*d      K*d      K*d     K*d + 1.00
+    ///
+    /// A = d * ( P(1.25) + P(1.50) + P(1.75) + P(2.00) )
+    /// fixed leg value   = K * A + P(2.00)
+    /// ```
+    ///
+    /// and `swap_maturity` is `start + n * delta` — 2.00 above, i.e. `1.0 + 4 * 0.25`.  Note the
+    /// maturity date is *in* the schedule (it is the `i = n` member), and principal sits on it on
+    /// top of that date's coupon.
+    ///
+    /// # Resolved: `num_swap_payments` is `n`, not `n + 1`
+    ///
+    /// This function used to carry `//open question, should num_swap_payments be
+    /// num_swap_payments+1??`.  It was written against the old body, which summed the fixed
+    /// coupons over `1..n` — visibly stopping one short of `n` — and then paid `(1 + K*delta)` at
+    /// the `n`-th date.  The "missing" `n`-th coupon is not missing: the `K*delta` inside that
+    /// `(1 + K*delta)` *is* the `i = n` coupon, paid alongside the principal on the maturity
+    /// date.  Extending the coupon sum to `n` and folding the principal back out is the same
+    /// number, term by term (writing `P_i` for `P(t, start + i * delta)`):
+    ///
+    /// ```text
+    ///   P(t,start) - sum_{i=1..n-1} K*d*P_i - (1 + K*d)*P_n
+    /// = P(t,start) - K*d*sum_{i=1..n}   P_i - P_n        (K*d*P_n added to each sum)
+    /// = P(t,start) - K*A(t)             - P_n
+    /// ```
+    ///
+    /// which is what [`HullWhite::swap_price_t_init_raw`] now returns.  Passing `n + 1` instead
+    /// would not just add a payment, it would move one: the schedule would run to `start +
+    /// (n+1)*delta`, so the worked example would pay a fifth coupon — and the principal — at 2.25
+    /// on a swap that matured at 2.00.
+    ///
+    /// The check that ties the two consumers together: setting fixed leg equal to floating leg
+    /// gives `K * A(t) + P(t, start + n*delta) = P(t, start)`, i.e.
+    /// `K = (P(t,start) - P(t,start+n*delta)) / A(t)`, which is exactly what
+    /// [`HullWhite::forward_swap_rate_t`] computes.  Feed that `K` back into the price and every
+    /// term cancels, which is another way of saying the two functions are counting the same four
+    /// dates.
+    ///
+    /// # Why the floating leg needs no annuity
+    ///
+    /// A floating-rate note is worth par on a reset date, so the whole remaining float leg — all
+    /// `n` of its reset coupons and its principal — is worth `1.0` at `start`, and `P(t, start)`
+    /// from `t`.  That single bond is the entire floating side; no-arbitrage is what makes its
+    /// sum of reset coupons plus principal collapse to the par it resets to.  The fixed leg has
+    /// no such shortcut, because its coupon does not reset: that sum is [`HullWhite::annuity_t`].
+    fn annuity_t(&self, r_t: f64, t: f64, start: f64, n: usize, delta: f64) -> f64 {
+        (1..(n + 1))
+            .map(|i| self.bond_price_t_raw(r_t, t, start + delta * (i as f64)))
+            .sum::<f64>()
+            * delta
+    }
     /// Returns forward swap rate at some future time
     ///
     /// # Examples
@@ -37,7 +125,7 @@ impl<'a> HullWhite<'a> {
         &self,
         r_t: f64,
         t: f64,
-        swap_initiation: f64, //must be greater than or equl to t
+        swap_initiation: f64, //must be greater than or equal to t
         num_swap_payments: usize,
         delta: f64,
     ) -> Result<f64, HullWhiteError> {
@@ -46,19 +134,19 @@ impl<'a> HullWhite<'a> {
         validation::not_before("swap_initiation", swap_initiation, "t", t)?;
         validation::at_least_one("num_swap_payments", num_swap_payments)?;
         validation::positive("delta", delta)?;
-        let denominator_swap: f64 = (1..(num_swap_payments + 1))
-            .map(|curr| self.bond_price_t_raw(r_t, t, swap_initiation + delta * (curr as f64)))
-            .sum::<f64>()
-            * delta;
+        let denominator_swap = self.annuity_t(r_t, t, swap_initiation, num_swap_payments, delta);
+        //The two zero-coupon legs the swap collapses to: par discounted from the reset date (the
+        //floating side, worth par at `swap_initiation`) and the principal discounted from the last
+        //payment date.  Under the convention stated on `annuity_t`,
+        //`swap_initiation + num_swap_payments * delta` *is* the swap's maturity -- the `i = n`
+        //payment date, the one that carries the principal on top of its coupon -- not maturity
+        //plus a period.
+        let par_at_start = self.bond_price_t_raw(r_t, t, swap_initiation);
+        let principal_at_maturity =
+            self.bond_price_t_raw(r_t, t, swap_initiation + (num_swap_payments as f64) * delta);
         validation::finish(
             "forward_swap_rate_t",
-            (self.bond_price_t_raw(r_t, t, swap_initiation)
-                - self.bond_price_t_raw(
-                    r_t,
-                    t,
-                    swap_initiation + (num_swap_payments as f64) * delta,
-                )) //swap_initiation + (num_swap_payments as f64) * delta)=swap_maturity+delta
-                / denominator_swap,
+            (par_at_start - principal_at_maturity) / denominator_swap,
         )
     }
     /// Returns forward swap rate at current time
@@ -170,6 +258,23 @@ impl<'a> HullWhite<'a> {
         self.forward_swap_rate_now(0.0, num_swap_payments, delta)
     }
     /// Returns price of a swap at some future time, not necessarily at initiation of the swap
+    ///
+    /// The remaining-payment count and the `swap_price_t_init` anchor are derived from
+    /// `swap_maturity`.  When maturity is a whole number of periods from `t` the anchor is `t`
+    /// itself, which is exactly what this module's `annuity_t` convention wants: payments
+    /// at `t + delta, ..., t + n * delta = swap_maturity`, principal on the last one.
+    ///
+    /// **Known gap, deliberately not fixed here.**  When maturity is *not* a whole number of
+    /// periods past `t`, the branch below anchors on `swap_maturity - (n - 1) * delta`, which is
+    /// the **next payment date** (`schedules`' own tests name that expression
+    /// `next_exchange_date`), not the reset date one period before it.  Under the convention the
+    /// anchor is `swap_maturity - n * delta`, so the off-schedule branch drops the first remaining
+    /// payment and repays principal a period past the stated maturity: with `t = 0.5`,
+    /// `swap_maturity = 2.0`, `delta = 0.4` it prices coupons at 1.2 / 1.6 / 2.0 / **2.4** with
+    /// principal at 2.4, where the real remaining schedule is 0.8 / 1.2 / 1.6 / 2.0 with principal
+    /// at 2.0.  The payment *count* is right; only the anchor is a period late.  Correcting it
+    /// moves prices by a whole period, not by rounding, so it belongs in its own change rather than
+    /// riding along inside a refactor that otherwise moves nothing past the last ulp.
     ///
     /// # Examples
     ///
@@ -341,18 +446,12 @@ impl<'a> HullWhite<'a> {
         delta: f64,
         swap_rate: f64,
     ) -> f64 {
-        //open question, should num_swap_payments be num_swap_payments+1??
-        let sm_bond: f64 = (1..num_swap_payments)
-            .map(|curr| {
-                self.bond_price_t_raw(r_t, t, swap_start + delta * (curr as f64))
-                    * swap_rate
-                    * delta
-            })
-            .sum();
+        //Floating leg at par, less the fixed leg (K * annuity), less the principal repaid on the
+        //last payment date -- which is also where the last coupon of the annuity falls, see
+        //`annuity_t` for the convention and for why `num_swap_payments` needs no +1 here.
         self.bond_price_t_raw(r_t, t, swap_start)
-            - sm_bond
-            - (1.0 + swap_rate * delta)
-                * self.bond_price_t_raw(r_t, t, swap_start + delta * (num_swap_payments as f64))
+            - swap_rate * self.annuity_t(r_t, t, swap_start, num_swap_payments, delta)
+            - self.bond_price_t_raw(r_t, t, swap_start + delta * (num_swap_payments as f64))
     }
     /// Returns price of a payer swaption at some future time t
     ///

@@ -11,10 +11,15 @@ skipped.
 ## [Unreleased]
 
 Intended next release: **0.10.0**. The block below adds public methods, which is a
-minor bump rather than the **0.9.1** patch first sketched here. No price moves: every
-number this crate returns is the number it was in 0.9.0, and the tree results are
-pinned bit-for-bit (`trees::tests::swaption_tree_at_t_is_bit_identical_to_pre_fix`), so
-the extra surface is not carrying a numeric change in disguise.
+minor bump rather than the **0.9.1** patch first sketched here. No price moves that
+any caller can see: every number this crate returns is the number it was in 0.9.0.
+One entry — the swap-annuity extraction — reassociates a sum, which moves prices in
+their last bits (worst measured `|Δ| = 4.4e-16`, worst relative `3.7e-11` on a price
+sitting within a rounding of its own zero, no sign flips). That is recorded by the tree
+pins rather than smoothed over: `trees::tests::swaption_tree_at_t_is_bit_identical_to_pinned_values`
+pins the new bit patterns and
+`trees::tests::swaption_tree_at_t_is_within_its_documented_reassociation_slack_of_0_9_0`
+bounds the distance from the 0.9.0 values at 16 ulps.
 
 ### Changed — identifiers that said the opposite of what they meant
 
@@ -206,6 +211,81 @@ CI ran on floating refs and swallowed the one failure that mattered.
   (`test.yml` uploads `lcov.info` to Coveralls). Both replaced with badges for what
   exists, each naming the default branch (`master`) explicitly.
 * `permissions: contents: read` added to the workflows that need nothing more.
+
+### Changed — the swap payment convention is a doc comment on one function
+
+`forward_swap_rate_t` and `swap_price_t_init` each hand-rolled the same discounted
+payment sum, over slightly different ranges, and `swap_price_t_init_raw` carried a
+live `//open question, should num_swap_payments be num_swap_payments+1??` inside
+pricing code that swaps, European swaptions and the American tree all depend on. The
+sums are now one helper, and the convention it computes is written down on it.
+
+* `HullWhite::annuity_t(r_t, t, start, n, delta)` is
+  `delta * sum_{i=1..n} P(t, start + i * delta)` (crate-internal, both swap
+  consumers call it, both hand-rolled loops deleted). Its doc comment states the
+  convention: a swap's `n` payment dates are `start + delta, ..., start + n * delta`;
+  **every one of them carries a coupon** (`K * delta` fixed, the reset Libor times
+  `delta` floating); and **the principal rides on the last of those same `n` dates**,
+  on top of that date's coupon — so `swap_maturity == start + n * delta` and the
+  principal exchange adds no date of its own. Worked example in the comment:
+  `start = 1.0, delta = 0.25, n = 4` → 1.25 / 1.50 / 1.75 / **2.00**, with the
+  notional on 2.00.
+* The open question is answered **no**, with the algebra rather than a shrug. The old
+  body summed coupons over `1..n` and paid a combined `(1 + K*delta)` at the `n`-th
+  date, which is why the `n`-th coupon looked missing — it is inside that
+  `(1 + K*delta)`, paid with the principal. Extending the sum to `n` and folding the
+  principal back out is the same number term by term:
+  `P_start − Σ_{i<n} K·δ·P_i − (1 + K·δ)·P_n = P_start − K·A − P_n`. Reading the
+  count as `n + 1` would not add a payment, it would add a *period*: the worked
+  example would pay a fifth coupon, and the principal, at 2.25 — a quarter past the
+  maturity.
+* Both consumers now read the same `A`, which is what makes the price's zero *be* the
+  rate: `forward_swap_rate_t = (P(t,start) − P(t,start+n·δ)) / A` is the fixed-equals-
+  floating condition, written for `K`. Setting the legs equal and solving gives back
+  exactly the formula the function computes — the two are counting the same dates.
+* Numbers. The refactor changes the association of the fixed-leg sum (fold `P_i` over
+  `1..=n`, scale the sum once by `K`, carry principal as its own term). Mathematically
+  identical; in f64 it is a reordering. Measured over 16,800 swap prices — all seven
+  named scenarios × 4 valuation times × 3 start offsets × `n ∈ {1, 4, 8, 20}` ×
+  `delta ∈ {0.25, 0.5}` × 5 strikes around the forward × 5 short rates:
+  worst `|Δ| = 4.4e-16`, worst relative `3.7e-11` (only on a one-period swap priced
+  within a rounding of its own zero, where cancellation does the amplifying), **zero**
+  sign flips, and 314 near-zero prices became *exactly* `0.0` where the old grouping
+  left a `~1e-16` residue. `annuity_t` keeps the old fold order of the discount
+  factors, so `forward_swap_rate_t` itself is bit-for-bit unchanged.
+* `swap_price_t`'s off-schedule anchor is documented as a **known gap, deliberately
+  not fixed here**. When the maturity is a whole number of periods past `t` the derived
+  anchor is `t`, which satisfies the convention; otherwise the branch uses
+  `swap_maturity − (n − 1) * delta`, which is the *next payment date* (`schedules`'
+  own tests name that expression `next_exchange_date`), not the reset date one period
+  before it. That branch therefore drops the first remaining payment and repays the
+  principal one period past the stated maturity (`t = 0.5`, maturity `2.0`, `delta`
+  `0.4` → coupons at 1.2 / 1.6 / 2.0 / **2.4** instead of 0.8 / 1.2 / 1.6 / 2.0).
+  The payment *count* is right; the anchor is a period late. Correcting it moves
+  prices by a whole period, not by rounding, so it is left for its own change instead
+  of riding along inside a refactor whose other effects end in ulps.
+* Tests. `swaps::tests::forward_swap_rate_is_the_exact_zero_of_the_swap_price_on_the_
+  semiannual_schedule` — a second schedule, 8 payments at `delta = 0.5`, every named
+  scenario × `t ∈ {0, 0.25, 0.5, 1.0}`, asserted `== 0.0` exactly (not to a
+  tolerance), plus `±1 bp` of strike moving the price by `∓annuity_t * bp`: the
+  annuity showing up as the swap's DV01 is a second, independent check that it sums
+  the right cash flows.
+  `swaps::tests::annuity_t_is_the_discounted_weight_of_the_payment_dates_it_documents`
+  checks the helper against hand-written discount factors for the doc's four dates,
+  against the one-payment case, against the `n + 1` additivity step, and against the
+  leg-balance identity `K * A + P(maturity) == P(start)`.
+  `swaps::tests::one_more_payment_is_a_different_swap_not_the_principal_being_counted`
+  pins the resolved question: the `n + 1` misreading is a 7.0e-4 instrument change on
+  that fixture — twelve orders of magnitude above the rounding this refactor moved —
+  and is flat only at the 5-payment forward rate. Existing `test_swap` /
+  `test_swap_init` pass unchanged.
+* The `t = 0` tree goldens are re-pinned for the reassociation (they moved 4–10 ulps).
+  `swaption_tree_at_t_is_bit_identical_to_pre_fix` is now
+  `swaption_tree_at_t_is_bit_identical_to_pinned_values`, and the new
+  `swaption_tree_at_t_is_within_its_documented_reassociation_slack_of_0_9_0` keeps
+  the 0.9.0 numbers in the file and asserts the 16-ulp bound, so the pin stays exact
+  against future changes while the size of this one stays checked rather than
+  remembered.
 
 ### Notes
 
