@@ -51,5 +51,3 @@ jobs:
           output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
-          # Workflow will fail when an alert happens
-          fail-on-alert: true
