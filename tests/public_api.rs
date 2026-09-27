@@ -371,9 +371,81 @@ fn swaption_calls() {
     // American prices stay monotone in the strike too.  They are *not* compared against the
     // European numbers here: the tree discretises the same payoff on `num_steps` buckets while the
     // analytic pricer integrates a Black approximation, so the two only agree in the limit.
-    // That comparison is the tree's own job — see `european_swaption_tree` in `src/trees.rs`.
+    // That comparison is the European tree's own job — see
+    // `european_tree_prices_cross_check_the_analytic_swaptions` below, and
+    // `european_payer_swaption_tree` / `european_receiver_swaption_tree` in `src/trees.rs`.
     assert!(am_payer(atm - 0.01) > am_payer(atm));
     assert!(am_receiver(atm + 0.01) > am_receiver(atm));
+}
+
+/// The tree-priced European swaptions are public API, and the publicity is the point: a consumer
+/// can put the tree and the closed-form Jamshidian price against each other without taking either
+/// route on faith.  The American tree cannot supply this check — early exercise makes it a
+/// different instrument — so `european_*_swaption_tree` exists to be the tree's half of the pair.
+///
+/// The bound is relative because the tree's error scales with the option value.  Worst measured
+/// residual here at 400 steps, over both sides: 2.1e-4 at `t = 0` and 3.9e-4 at `t = 0.5`,
+/// against `1e-3` allowed -- ~2.5x headroom, and it tightens as `num_steps` grows, so a failure
+/// means the wiring disagrees rather than the discretisation being coarse.  Deliberately orders
+/// of magnitude tighter than the several-percent error a time-coordinate mistake produces on the
+/// same call.
+#[test]
+fn european_tree_prices_cross_check_the_analytic_swaptions() {
+    let hw = model();
+    let delta = 0.25;
+    let num_swap_payments = 4;
+    let steps = 400;
+    let within = |analytic: f64, tree: f64, side: &str, t: f64| {
+        let relative = (analytic - tree).abs() / analytic;
+        assert!(
+            relative < 1e-3,
+            "{side} swaption at t = {t}: tree {tree} vs analytic {analytic} \
+             (relative {relative:.3e}, bound 1.0e-3)"
+        );
+    };
+    for t in [0.0, 0.5] {
+        let option_maturity = t + 1.0;
+        let strike = hw
+            .forward_swap_rate_t(0.05, t, option_maturity, num_swap_payments, delta)
+            .unwrap();
+        let analytic_payer = hw
+            .european_payer_swaption_t(0.05, t, option_maturity, num_swap_payments, delta, strike)
+            .unwrap();
+        let tree_payer = hw
+            .european_payer_swaption_tree(
+                0.05,
+                t,
+                option_maturity,
+                num_swap_payments,
+                delta,
+                strike,
+                steps,
+            )
+            .unwrap();
+        let analytic_receiver = hw
+            .european_receiver_swaption_t(
+                0.05,
+                t,
+                option_maturity,
+                num_swap_payments,
+                delta,
+                strike,
+            )
+            .unwrap();
+        let tree_receiver = hw
+            .european_receiver_swaption_tree(
+                0.05,
+                t,
+                option_maturity,
+                num_swap_payments,
+                delta,
+                strike,
+                steps,
+            )
+            .unwrap();
+        within(analytic_payer, tree_payer, "payer", t);
+        within(analytic_receiver, tree_receiver, "receiver", t);
+    }
 }
 
 // ---- errors reach the consumer -----------------------------------------------------
@@ -546,6 +618,22 @@ fn every_now_variant_is_its_t_variant_at_zero() {
         hw.american_receiver_swaption_t(r0, 0.0, 1.0, 4, delta, 0.045, 40)
             .unwrap(),
         "american_receiver_swaption",
+    );
+    //The European tree helpers follow the same `now` contract as everything else: `now` is the
+    //`t` call at the curve-derived `r(0)`, exactly -- here bit-identical, since one calls the other.
+    close(
+        hw.european_payer_swaption_tree_now(1.0, 4, delta, 0.045, 40)
+            .unwrap(),
+        hw.european_payer_swaption_tree(r0, 0.0, 1.0, 4, delta, 0.045, 40)
+            .unwrap(),
+        "european_payer_swaption_tree",
+    );
+    close(
+        hw.european_receiver_swaption_tree_now(1.0, 4, delta, 0.045, 40)
+            .unwrap(),
+        hw.european_receiver_swaption_tree(r0, 0.0, 1.0, 4, delta, 0.045, 40)
+            .unwrap(),
+        "european_receiver_swaption_tree",
     );
 }
 

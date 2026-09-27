@@ -4,12 +4,18 @@
 //! helpers, the European tree against the analytic swaption at `t = 0` and `t > 0`, a
 //! bit-identical `t = 0` result versus the pre-fix pricers, and a positive early-exercise
 //! premium for the American swaptions at `t > 0`.
+//!
+//! Every tree price here is taken through the **public** `european_*_swaption_tree` /
+//! `american_*_swaption_t` entry points rather than through the private [`HullWhite::swaption_tree`]
+//! kernel: both sides of the parity checks are then calls a consumer could make, which is the
+//! whole reason the European tree helper is public.  The kernel itself has no behaviour beyond
+//! what those entry points reach.
 
 use approx::*;
 
 use super::{max_or_zero, payoff_swaption};
 use crate::HullWhite;
-use crate::test_support::{STEEP_CURVE, hw_curve};
+use crate::test_support::{ALL_SCENARIOS, STEEP_CURVE, hw_curve};
 
 #[test]
 fn test_max_or_zero() {
@@ -64,16 +70,17 @@ fn european_swaption_tree_matches_analytic_when_t_is_zero() {
             swap_rate,
         )
         .unwrap();
-    let tree_payer = hull_white.european_swaption_tree(
-        curr_rate,
-        future_time,
-        option_maturity,
-        num_swap_payments,
-        delta,
-        swap_rate,
-        true,
-        steps,
-    );
+    let tree_payer = hull_white
+        .european_payer_swaption_tree(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            steps,
+        )
+        .unwrap();
     assert_abs_diff_eq!(payer, tree_payer, epsilon = 0.0001);
 }
 
@@ -149,30 +156,32 @@ fn swaption_tree_at_t_is_bit_identical_to_pre_fix() {
             .forward_swap_rate_t(r0, 0.0, option_maturity, num_swap_payments, delta)
             .unwrap();
         assert_bits_eq(
-            hull_white.european_swaption_tree(
-                r0,
-                0.0,
-                option_maturity,
-                num_swap_payments,
-                delta,
-                swap_rate,
-                true,
-                steps,
-            ),
+            hull_white
+                .european_payer_swaption_tree(
+                    r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                )
+                .unwrap(),
             eur_p,
             &format!("{name} european payer tree"),
         );
         assert_bits_eq(
-            hull_white.european_swaption_tree(
-                r0,
-                0.0,
-                option_maturity,
-                num_swap_payments,
-                delta,
-                swap_rate,
-                false,
-                steps,
-            ),
+            hull_white
+                .european_receiver_swaption_tree(
+                    r0,
+                    0.0,
+                    option_maturity,
+                    num_swap_payments,
+                    delta,
+                    swap_rate,
+                    steps,
+                )
+                .unwrap(),
             eur_r,
             &format!("{name} european receiver tree"),
         );
@@ -268,28 +277,125 @@ fn european_swaption_tree_matches_analytic_when_t_is_nonzero() {
             swap_rate,
         )
         .unwrap();
-    let tree_payer = hull_white.european_swaption_tree(
-        curr_rate,
-        future_time,
-        option_maturity,
-        num_swap_payments,
-        delta,
-        swap_rate,
-        true,
-        steps,
-    );
-    let tree_receiver = hull_white.european_swaption_tree(
-        curr_rate,
-        future_time,
-        option_maturity,
-        num_swap_payments,
-        delta,
-        swap_rate,
-        false,
-        steps,
-    );
+    let tree_payer = hull_white
+        .european_payer_swaption_tree(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            steps,
+        )
+        .unwrap();
+    let tree_receiver = hull_white
+        .european_receiver_swaption_tree(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            steps,
+        )
+        .unwrap();
     assert_abs_diff_eq!(payer, tree_payer, epsilon = 0.0001);
     assert_abs_diff_eq!(receiver, tree_receiver, epsilon = 0.0001);
+}
+
+/// The same parity check the two tests above run on one fixture, run over every calibration and
+/// every valuation time this crate names.
+///
+/// Both products come out of the *shared* tree wiring ([`HullWhite::swaption_tree`]), so the
+/// cross-check has to hold everywhere the wiring is used, not just at the two points that were
+/// written down when the time-coordinate fix was made.  The tolerance is relative rather than
+/// absolute because the option value varies by an order of magnitude across the scenarios: a flat
+/// `1e-4` would be tight against `low_vol`'s tiny prices and loose against `high_vol`'s big ones,
+/// while the tree's error scales with the price.
+///
+/// Worst measured relative residual at 400 steps, over all 42 (scenario, t, side) points:
+/// `7.0e-4` (`high_vol` receiver).  The bound below is `2.5e-3`, ~3.5x that, and ~5 orders
+/// tighter than the shifted-clock error it is guarding against (13-16% at the same point).
+#[test]
+fn european_tree_matches_analytic_across_every_scenario_and_valuation_time() {
+    let num_swap_payments = 8;
+    let steps = 400;
+    //Relative slack on the tree-vs-analytic residual; see the doc comment for the measured worst case.
+    let relative_slack = 2.5e-3;
+    for scenario in ALL_SCENARIOS {
+        let curve = scenario.curve();
+        let hull_white = HullWhite::new(scenario.a, scenario.sigma, &curve).unwrap();
+        for t in [0.0, 0.5, 1.0] {
+            let option_maturity = t + 1.0;
+            let swap_rate = hull_white
+                .forward_swap_rate_t(
+                    scenario.curr_rate,
+                    t,
+                    option_maturity,
+                    num_swap_payments,
+                    scenario.delta,
+                )
+                .unwrap();
+            for is_payer in [true, false] {
+                let side = if is_payer { "payer" } else { "receiver" };
+                let analytic = if is_payer {
+                    hull_white
+                        .european_payer_swaption_t(
+                            scenario.curr_rate,
+                            t,
+                            option_maturity,
+                            num_swap_payments,
+                            scenario.delta,
+                            swap_rate,
+                        )
+                        .unwrap()
+                } else {
+                    hull_white
+                        .european_receiver_swaption_t(
+                            scenario.curr_rate,
+                            t,
+                            option_maturity,
+                            num_swap_payments,
+                            scenario.delta,
+                            swap_rate,
+                        )
+                        .unwrap()
+                };
+                let tree = if is_payer {
+                    hull_white
+                        .european_payer_swaption_tree(
+                            scenario.curr_rate,
+                            t,
+                            option_maturity,
+                            num_swap_payments,
+                            scenario.delta,
+                            swap_rate,
+                            steps,
+                        )
+                        .unwrap()
+                } else {
+                    hull_white
+                        .european_receiver_swaption_tree(
+                            scenario.curr_rate,
+                            t,
+                            option_maturity,
+                            num_swap_payments,
+                            scenario.delta,
+                            swap_rate,
+                            steps,
+                        )
+                        .unwrap()
+                };
+                let relative = (analytic - tree).abs() / analytic;
+                assert!(
+                    relative < relative_slack,
+                    "{} at t = {t}, {side} swaption: tree {tree} vs analytic {analytic} \
+                     (relative {relative:.3e}, bound {relative_slack:.1e})",
+                    scenario.name,
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -382,6 +488,61 @@ fn american_swaption_tree_at_nonzero_t_carries_a_positive_early_exercise_premium
                  400={american_400}, european={european}"
         );
     }
+}
+
+/// The tree entry points validate as one set, because they share one validator.  A call that the
+/// American side refuses has to be refused by the European tree side too -- otherwise the two
+/// halves of the cross-check accept different instruments and stop being comparable.
+#[test]
+fn every_tree_entry_point_rejects_the_same_bad_instruments() {
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
+    //num_swap_payments = 0, on both sides and both styles.
+    assert!(
+        hull_white
+            .european_payer_swaption_tree(0.05, 1.0, 1.5, 0, 0.25, 0.04, 50)
+            .is_err()
+    );
+    assert!(
+        hull_white
+            .european_receiver_swaption_tree(0.05, 1.0, 1.5, 0, 0.25, 0.04, 50)
+            .is_err()
+    );
+    //num_steps = 0 (the tree would have no nodes).
+    assert!(
+        hull_white
+            .european_payer_swaption_tree(0.05, 1.0, 1.5, 8, 0.25, 0.04, 0)
+            .is_err()
+    );
+    assert!(
+        hull_white
+            .european_receiver_swaption_tree(0.05, 1.0, 1.5, 8, 0.25, 0.04, 0)
+            .is_err()
+    );
+    //An option that has already expired relative to the valuation time.
+    assert!(
+        hull_white
+            .european_payer_swaption_tree(0.05, 1.5, 1.5, 8, 0.25, 0.04, 50)
+            .is_err()
+    );
+    //A non-finite strike, and a non-positive tenor.
+    let nan = f64::NAN;
+    assert!(
+        hull_white
+            .european_receiver_swaption_tree(0.05, 1.0, 1.5, 8, 0.25, nan, 50)
+            .is_err()
+    );
+    assert!(
+        hull_white
+            .european_payer_swaption_tree(0.05, 1.0, 1.5, 8, 0.0, 0.04, 50)
+            .is_err()
+    );
+    //A negative valuation time.
+    assert!(
+        hull_white
+            .european_receiver_swaption_tree(0.05, -1.0, 1.5, 8, 0.25, 0.04, 50)
+            .is_err()
+    );
 }
 
 mod legacy_swaptions;

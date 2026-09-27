@@ -9,7 +9,10 @@
 //! decomposition: [`deliverable_at_expiry`] rebuilds what the exercising holder has, then
 //! [`super::payoff_integral`] integrates that payoff over the expiry-date distribution of the
 //! rate, and [`tree_option_price`] rolls the same payoff back through a short-rate lattice.  The
-//! two references share no code with each other or with the pricer.
+//! two references share no code with each other or with the pricer; the lattice in
+//! [`tree_option_price`] is the crate's shared tree engine ([`HullWhite::tree_price`]), which
+//! knows nothing about bonds, coupons or Jamshidian -- it is the time-coordinate plumbing, and
+//! making it one copy is what stops a fix having to be applied here as well as in `crate::trees`.
 
 use crate::HullWhite;
 use crate::test_support::{STEEP_CURVE, hw_curve};
@@ -69,8 +72,11 @@ fn deliverable_at_expiry(
 /// `binomial_tree` Black-Vasicek lattice from `t` to expiry, the deliverable is re-valued at each
 /// expiry node, and the payoff is rolled back with each node's own discount factor.
 ///
-/// Tree time `tau` means absolute model time `t + tau`, so `phi` is cached on the absolute clock
-/// exactly as `crate::trees` does.
+/// The lattice is [`HullWhite::tree_price`], the engine the swaption trees run on, so the
+/// tree-time-versus-absolute-time convention that `phi` is cached against is written once for the
+/// whole crate (this function used to carry its own copy of it, which is how the same bug got paid
+/// for three times).  What stays independent is the thing under test: the payoff, rebuilt from the
+/// schedule by [`deliverable_at_expiry`] rather than decomposed.
 #[allow(clippy::too_many_arguments)] //a pricer's instrument plus the tree's resolution
 fn tree_option_price(
     hull_white: &HullWhite,
@@ -82,37 +88,20 @@ fn tree_option_price(
     is_call: bool,
     num_steps: usize,
 ) -> f64 {
-    let alpha_div_sigma = |_t_step: f64, curr_val: f64, _dt: f64, _width: usize| {
-        -(hull_white.a * curr_val) / hull_white.sigma
-    };
-    let sigma_prime = |_t_step: f64, _curr_val: f64, _dt: f64, _j: usize| 0.0;
-    let sigma_inv = |_t_step: f64, y: f64, _dt: f64, _j: usize| hull_white.sigma * y;
-    let horizon = option_maturity - t;
-    let mut phi_cache: Vec<f64> = binomial_tree::get_all_t(horizon, num_steps)
-        .map(|tau| hull_white.phi_t(t + tau))
-        .collect();
-    phi_cache.push(hull_white.phi_t(t + horizon));
-    let payoff = |_t_step: f64, curr_val: f64, _dt: f64, j: usize| {
-        let value = underlying_at_expiry(curr_val + phi_cache[j]);
-        let payoff = if is_call {
-            value - strike
-        } else {
-            strike - value
-        };
-        if payoff > 0.0 { payoff } else { 0.0 }
-    };
-    let discount =
-        |_t_step: f64, curr_val: f64, dt: f64, j: usize| (-(curr_val + phi_cache[j]) * dt).exp();
-    binomial_tree::compute_price_raw(
-        &alpha_div_sigma,
-        &sigma_prime,
-        &sigma_inv,
-        &payoff,
-        &discount,
-        (r_t - hull_white.phi_t(t)) / hull_white.sigma,
-        horizon,
+    hull_white.tree_price(
+        r_t,
+        t,
+        option_maturity - t,
         num_steps,
         false,
+        &|_tau: f64, rate: f64, _dt: f64, _j: usize| {
+            let payoff = if is_call {
+                underlying_at_expiry(rate) - strike
+            } else {
+                strike - underlying_at_expiry(rate)
+            };
+            if payoff > 0.0 { payoff } else { 0.0 }
+        },
     )
 }
 

@@ -1,5 +1,11 @@
 //! The long-standing swaption fixtures: the American tree price has to beat the analytic
 //! European price, on the flat calibration that predates the steep fixture.
+//!
+//! The European side of each pair is priced with the public
+//! [`european_payer_swaption_tree`](crate::HullWhite::european_payer_swaption_tree) /
+//! [`european_receiver_swaption_tree`](crate::HullWhite::european_receiver_swaption_tree)
+//! helpers, so this file is the same "tree vs Jamshidian" cross-check from the crate's own tests
+//! that a downstream user can now write.
 
 use approx::*;
 
@@ -36,18 +42,18 @@ fn payer_swaption() {
             swap_rate,
         )
         .unwrap();
-    let is_payer = true;
 
-    let tree = hull_white.european_swaption_tree(
-        curr_rate,
-        future_time,
-        option_maturity,
-        num_swap_payments,
-        delta,
-        swap_rate,
-        is_payer,
-        100,
-    );
+    let tree = hull_white
+        .european_payer_swaption_tree(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            100,
+        )
+        .unwrap();
     assert_abs_diff_eq!(analytical, tree, epsilon = 0.0001)
 }
 
@@ -81,18 +87,18 @@ fn receiver_swaption() {
             swap_rate,
         )
         .unwrap();
-    let is_payer = false;
 
-    let tree = hull_white.european_swaption_tree(
-        curr_rate,
-        future_time,
-        option_maturity,
-        num_swap_payments,
-        delta,
-        swap_rate,
-        is_payer,
-        100,
-    );
+    let tree = hull_white
+        .european_receiver_swaption_tree(
+            curr_rate,
+            future_time,
+            option_maturity,
+            num_swap_payments,
+            delta,
+            swap_rate,
+            100,
+        )
+        .unwrap();
     assert_abs_diff_eq!(analytical, tree, epsilon = 0.0001)
 }
 

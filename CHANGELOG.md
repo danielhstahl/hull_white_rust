@@ -10,8 +10,60 @@ skipped.
 
 ## [Unreleased]
 
-Intended next release: **0.9.1** — documentation and packaging only. No pricing
-code changes; every price is the number it was in 0.9.0.
+Intended next release: **0.10.0**. The block below adds public methods, which is a
+minor bump rather than the **0.9.1** patch first sketched here. No price moves: every
+number this crate returns is the number it was in 0.9.0, and the tree results are
+pinned bit-for-bit (`trees::tests::swaption_tree_at_t_is_bit_identical_to_pre_fix`), so
+the extra surface is not carrying a numeric change in disguise.
+
+### Added — the European swaption tree, public, so it can be cross-checked
+
+* `HullWhite::european_payer_swaption_tree`, `HullWhite::european_receiver_swaption_tree`,
+  and the `..._tree_now` variants. Same instrument and same argument list as the
+  closed-form `european_*_swaption_t` / `european_*_swaption_now` pricers, plus
+  `num_steps` for the tree resolution.
+* The tree already existed — as a `#[cfg(test)]` private function. So the parity check it
+  was written for could not be run by anyone outside this crate, even though it is the one
+  check of the analytic Jamshidian swaption that needs no third pricer: a lattice and a
+  decomposition reach the same price by independent means, and a wiring fault in either one
+  shows up as a gap. The time-coordinate bug this module carried was a 13–16% error at
+  `t > 0` that neither route could see on its own.
+* They are documented as **verification helpers**, not as a way to price a European
+  swaption. `european_*_swaption_t` is exact within the model's own approximation and
+  costs a tree nothing; reach for the tree to check the closed form, not to replace it.
+* `HullWhite::tree_price` (`pub(crate)`): the lattice engine — drift, volatility, the
+  per-step `phi` cache, the node discount, the exercise style — taking the payoff as a
+  closure written against the short rate at the node.
+
+### Changed — one copy of the tree wiring
+
+* `american_swaption` and `european_swaption_tree` were the same ~35 lines, hand-maintained
+  twice: identical `alpha_div_sigma` / `sigma_prime` / `sigma_inv`, identical `phi_cache`
+  construction including its extra tail element, identical payoff and discount closures,
+  differing only in the final call. They are now one `SwaptionSpec` (state, swap leg, side,
+  resolution) handed to one engine with an `is_american` flag.
+* A third near-copy of the same wiring, `tree_option_price` in
+  `jamshidian/tests/straddling.rs`, runs on that engine too. The tree-time
+  (`tau`) versus absolute-model-time (`t + tau`) convention — the thing that had the bug —
+  is now written down once, in `HullWhite::tree_price`, instead of three times in three
+  files that had to be edited together.
+* `binomial_tree::compute_price_american` is no longer called. Both sides go through
+  `compute_price_raw(..., is_american)`; upstream the former *is* the latter with `true`, so
+  the American numbers are unchanged to the bit — which is why the existing golden test
+  still passes with its exact bit patterns rather than a tolerance.
+* The four `american_*` public signatures are unchanged.
+* The four copies of the swaption argument-validation block are one `validate_swaption`, so
+  a bad instrument is refused with the same message by every entry point on the tree, on
+  either side and in either exercise style.
+* Tests: the tree tests now price through the **public** entry points rather than the private
+  helper, so what they cover is what a consumer calls. Added
+  `european_tree_matches_analytic_across_every_scenario_and_valuation_time` (all seven named
+  calibrations, `t` = 0 / 0.5 / 1.0, both sides, 400 steps, relative bound 2.5e-3 against a
+  measured worst case of 7.0e-4),
+  `every_tree_entry_point_rejects_the_same_bad_instruments` (the shared validator), and
+  `tests/public_api.rs::european_tree_prices_cross_check_the_analytic_swaptions`, which
+  runs the cross-check from outside the crate — the thing the `cfg(test)` helper made
+  impossible.
 
 ### Fixed — documentation that contradicted the code
 

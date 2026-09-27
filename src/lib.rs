@@ -163,7 +163,7 @@
 //! | `options` | bond options and coupon-bond option entry points |
 //! | `rates` | caplets, whole caps and floors over a period schedule, Eurodollar futures, forward and spot Libor |
 //! | `swaps` | forward swap rate, swap price, European swaptions |
-//! | `trees` | the short-rate tree: European tree check and American swaptions |
+//! | `trees` | the short-rate tree: the shared lattice engine (`tree_price`), the European tree cross-check (`european_*_swaption_tree`) and the American swaptions |
 //! | [`error`] | [`error::HullWhiteError`] |
 //! | `validation` | the input contract every public entry point is checked against |
 //! | `rootfinder` | the bracketed, safeguarded scalar root solver |
