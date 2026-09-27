@@ -15,9 +15,9 @@ pub enum HullWhiteError {
 impl fmt::Display for HullWhiteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            HullWhiteError::RootFindingError(msg) => write!(f, "Root finding error: {}", msg),
-            HullWhiteError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
-            HullWhiteError::NumericalError(msg) => write!(f, "Numerical error: {}", msg),
+            HullWhiteError::RootFindingError(msg) => write!(f, "Root finding error: {msg}"),
+            HullWhiteError::InvalidInput(msg) => write!(f, "Invalid input: {msg}"),
+            HullWhiteError::NumericalError(msg) => write!(f, "Numerical error: {msg}"),
         }
     }
 }

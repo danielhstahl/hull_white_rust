@@ -185,8 +185,7 @@ pub(super) fn lying(solver: SolveFn<'_>) -> bool {
         initial_guess: None,
     };
     solver(&|x| x - 0.25, &|_| -1.0, Some((0.0, 1.0)), 0.9, &settings)
-        .map(|s| (s.root - 0.25).abs() < 1e-9)
-        .unwrap_or(false)
+        .is_ok_and(|s| (s.root - 0.25).abs() < 1e-9)
 }
 
 /// A function with no root must be reported, never answered.
@@ -196,9 +195,7 @@ pub(super) fn no_root(solver: SolveFn<'_>) -> bool {
         max_iterations: 500,
         initial_guess: None,
     };
-    solver(&|x| x * x + 1.0, &|x| 2.0 * x, None, 0.0, &settings)
-        .map(|_| false)
-        .unwrap_or(true)
+    solver(&|x| x * x + 1.0, &|x| 2.0 * x, None, 0.0, &settings).is_err()
 }
 
 /// Runs one grid case through the ported solver, its tight reference and the old `nrfind` solve.

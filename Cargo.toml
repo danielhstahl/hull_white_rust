@@ -80,5 +80,110 @@ nrfind = "1.0.3"
 [lints.rust]
 missing_docs = "deny"
 
+# Clippy policy, declared next to `[lints.rust]` for the same reason: the manifest reaches every
+# target cargo builds through it — lib, tests, benches — where an attribute in `src/lib.rs`
+# reaches only the file that carries it.
+#
+# The posture is *pedantic, minus a written list of exceptions*.  `pedantic` is enabled as a
+# warning at low priority and both lint jobs run `clippy -- -D warnings`
+# (see `.github/workflows/lint.yml`), so everything in the group is blocking.  What the crate
+# does not satisfy is `allow`ed lint-by-lint below rather than by muting the group: the
+# exceptions stay countable in one place, and when a clippy upgrade adds a new pedantic lint it
+# arrives as a warning to adjudicate instead of as free compliance.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+# --- Kept at zero.  Same level the group already gives them; written out so the enforced set is
+# greppable, and so a lint that some future clippy moves out of `pedantic` does not quietly stop
+# being checked.  All of these were cleaned up across the crate, see CHANGELOG.
+#
+#   match_bool                        `if`/`else`, not `match b { true => .., false => .. }`
+#   if_not_else                       positive branch first
+#   explicit_iter_loop                `for x in &xs`, not `for x in xs.iter()`
+#   uninlined_format_args             `"{x}"`, not `"{x}", x`
+#   map_unwrap_or                     `opt.map_or(default, f)`, one adapter not two
+#   range_plus_one                    `(1..=n)`, not `1..(n + 1)`
+#   manual_let_else                   `let Some(x) = o else { return .. };`
+#   manual_assert_eq                  `assert_eq!(a, b)`, not `assert!(a == b)`
+#   semicolon_if_nothing_returned     a unit-returning last statement gets its `;`
+#   should_panic_without_expect       a panic test names the message it expects
+#   redundant_closure_for_method_calls  `.map(str::trim)`, not `.map(|s| s.trim())`
+#   items_after_statements            types and consts declared before the code that runs
+#   doc_markdown                      backticks on identifiers inside doc comments
+match_bool = "warn"
+if_not_else = "warn"
+explicit_iter_loop = "warn"
+uninlined_format_args = "warn"
+map_unwrap_or = "warn"
+range_plus_one = "warn"
+manual_let_else = "warn"
+manual_assert_eq = "warn"
+semicolon_if_nothing_returned = "warn"
+should_panic_without_expect = "warn"
+redundant_closure_for_method_calls = "warn"
+items_after_statements = "warn"
+doc_markdown = "warn"
+
+# --- Allowed, on purpose.  Each of these fires on this code; the text is the policy, so the
+# next person who meets one knows whether it was decided or overlooked. ---
+#
+# Casting.  `usize` payment counts and step indices become `f64` times, `f64` accumulators
+# become counters, and the ranges are bounded by the instrument (a tenor in quarters, an
+# iteration cap) rather than by the type.  `f64::from(n)` is exact where `n as f64` is only
+# exact-in-practice, but on numbers this crate puts in it there is no difference, and a
+# truncation/sign-loss warning on a deliberately narrowed count reads as a bug report when it
+# is the design.
+cast_precision_loss = "allow"
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+#
+# Exact float comparison.  Anything that must *tolerate* error goes through
+# `approx::assert_abs_diff_eq!` with an explicit epsilon; what is left compares exactly
+# representable values, zeroes and sentinels, where a tolerance would be the smaller lie.
+float_cmp = "allow"
+#
+# A `# Errors` section on every `Result`-returning function.  A few have one, where the
+# contract is subtle; making it universal is a boilerplate block on ~110 methods, and the lint
+# cannot check that the prose says anything true anyway.  The error type itself is documented
+# at `crate::error::HullWhiteError`.
+missing_errors_doc = "allow"
+#
+# `#[must_use]` on public candidates.  Almost the whole public surface returns `Result`, which
+# cannot be silently discarded already; the bare getters and constructors this lint leaves are
+# cheap values whose discard is obvious at the call site.
+must_use_candidate = "allow"
+#
+# Functions longer than the 100-line pedantic default.  They are solver loops, report writers
+# and the tree engine: cohesive runs whose split is a structural change, not a style fix.
+too_many_lines = "allow"
+#
+# Long numeric literals.  The golden values and epsilons in the tests are transcribed verbatim
+# from test output and the model report; grouping digits with underscores or switching to
+# exponent form breaks that copy-paste round trip and makes a mistyped digit harder to spot
+# against the source number.
+unreadable_literal = "allow"
+#
+# Named lifetimes on the borrowed-curve impls.  `impl<'a> HullWhite<'a>` says the struct is
+# parameterised over the caller's curve borrow; `impl HullWhite<'_>` elides exactly the name
+# that carries that meaning.
+elidable_lifetime_names = "allow"
+#
+# `0.5 * (a + b)` kept over `f64::midpoint`.  In the bisection and the antithetic-pair
+# averaging it is the formula as written in the model notes, and `midpoint`'s overflow
+# handling is not a case these values reach.
+manual_midpoint = "allow"
+#
+# Short math names.  `a`, `b`, `sd`, `v2`/`v3` are the model's own symbols and the solver
+# variants' names; renaming to satisfy the similarity heuristic would lose the mapping.
+similar_names = "allow"
+many_single_char_names = "allow"
+#
+# Report building.  `push_str(&format!(..))` and a `format!` inside a `collect` are the
+# readable shape for the MC budget report and the release-surface dump; `write!` into a buffer
+# or a hand-rolled iterator obscures what is being printed to buy back a lint.
+format_push_string = "allow"
+format_collect = "allow"
+
 [profile.bench]
 lto = true

@@ -1,5 +1,5 @@
 //! Unit tests for the bond-option pricers, against an external reference value
-//! (bondoption_vasicek.html on quantcalc.net) and against the coupon-bond decomposition
+//! (`bondoption_vasicek.html` on quantcalc.net) and against the coupon-bond decomposition
 //! degenerated to a single zero-coupon leg.
 
 use approx::*;
@@ -28,7 +28,7 @@ fn zero_coupon_reference() {
             strike,
         )
         .unwrap();
-    assert_abs_diff_eq!(bond_call, 0.033282, epsilon = 0.0001)
+    assert_abs_diff_eq!(bond_call, 0.033282, epsilon = 0.0001);
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn zero_coupon_to_coupon() {
         )
         .unwrap();
 
-    assert_abs_diff_eq!(bond_call, coupon_bond_call, epsilon = 0.0001)
+    assert_abs_diff_eq!(bond_call, coupon_bond_call, epsilon = 0.0001);
 }
 
 /// The `now` twins of the Jamshidian entry points are the `t` form at `(r(0), 0)`, exactly.

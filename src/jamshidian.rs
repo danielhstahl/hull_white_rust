@@ -70,6 +70,7 @@ use crate::validation;
 /// than the strike in *every* rate state the option is exercised whatever happens, which makes the
 /// call a parity value and the put nothing -- and that difference is not readable off the leg
 /// closures, both of which return their own zero-strike answer.
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum Side {
     Call,
     Put,

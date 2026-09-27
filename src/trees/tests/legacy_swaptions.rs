@@ -54,7 +54,7 @@ fn payer_swaption() {
             100,
         )
         .unwrap();
-    assert_abs_diff_eq!(analytical, tree, epsilon = 0.0001)
+    assert_abs_diff_eq!(analytical, tree, epsilon = 0.0001);
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn receiver_swaption() {
             100,
         )
         .unwrap();
-    assert_abs_diff_eq!(analytical, tree, epsilon = 0.0001)
+    assert_abs_diff_eq!(analytical, tree, epsilon = 0.0001);
 }
 
 #[test]

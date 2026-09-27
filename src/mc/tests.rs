@@ -262,7 +262,7 @@ fn the_budget_is_variance_plus_the_stated_bias() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "budget exceeded")]
 fn a_deviation_outside_the_budget_fails() {
     let est = sample_estimate(0.03, 1e-4);
     Check {

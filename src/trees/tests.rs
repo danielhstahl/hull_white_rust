@@ -18,10 +18,19 @@ use crate::HullWhite;
 use crate::test_support::{ALL_SCENARIOS, STEEP_CURVE, hw_curve};
 
 #[test]
-fn test_max_or_zero() {
+fn max_or_zero_takes_the_positive_part_and_squashes_nan_to_zero() {
     let v = 1.0;
     assert_eq!(max_or_zero(v), 1.0);
     assert_eq!(max_or_zero(-v), 0.0);
+    assert_eq!(max_or_zero(0.0), 0.0);
+    // NaN collapses to `0.0` rather than propagating, and `-0.0` comes back as `+0.0`.
+    // This is the behaviour the previous `if v > 0.0 { v } else { 0.0 }` had (NaN fails the
+    // comparison and takes the `else` arm), so the `v.max(0.0)` spelling changes nothing -- but
+    // `f64::max` is not NaN-propagating, which is surprising enough to pin by assertion.
+    assert_eq!(max_or_zero(f64::NAN), 0.0);
+    assert!(max_or_zero(-0.0).is_sign_positive());
+    assert_eq!(max_or_zero(f64::NEG_INFINITY), 0.0);
+    assert_eq!(max_or_zero(f64::INFINITY), f64::INFINITY);
 }
 
 #[test]
@@ -31,6 +40,10 @@ fn test_payoff_swaption() {
     assert_eq!(payoff_swaption(false, v), 0.0);
     assert_eq!(payoff_swaption(true, -v), 0.0);
     assert_eq!(payoff_swaption(false, -v), 1.0);
+    // A NaN swap value is an exercise-nothing payoff on either side, by the same route as
+    // `max_or_zero` -- the sign of a NaN is not a side you can exercise.
+    assert_eq!(payoff_swaption(true, f64::NAN), 0.0);
+    assert_eq!(payoff_swaption(false, f64::NAN), 0.0);
 }
 
 #[test]
@@ -107,10 +120,6 @@ fn european_swaption_tree_matches_analytic_when_t_is_zero() {
 /// checked against the 0.9.0 numbers instead of left as prose.
 #[test]
 fn swaption_tree_at_t_is_bit_identical_to_pinned_values() {
-    let option_maturity = 1.5;
-    let num_swap_payments = 20;
-    let delta = 0.25;
-    let steps = 400;
     /// One row of captured pre-fix values.  Named fields rather than a nine-slot
     /// tuple: the tuple version tripped `clippy::type_complexity`, and an
     /// unlabeled `(f64, f64, f64, f64, f64, f64, f64, f64)` is exactly the shape
@@ -127,6 +136,10 @@ fn swaption_tree_at_t_is_bit_identical_to_pinned_values() {
         amer_payer: f64,
         amer_receiver: f64,
     }
+    let option_maturity = 1.5;
+    let num_swap_payments = 20;
+    let delta = 0.25;
+    let steps = 400;
     let golden = [
         GoldenRow {
             name: "legacy",

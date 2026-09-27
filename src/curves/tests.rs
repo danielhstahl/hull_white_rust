@@ -47,7 +47,7 @@ fn every_scenario_curve_is_accepted() {
         let curve = s.curve();
         let bad = max_forward_inconsistency(&curve);
         assert!(
-            bad.map(|b| b.error <= b.tolerance).unwrap_or(false),
+            bad.is_some_and(|b| b.error <= b.tolerance),
             "{} rejected by the consistency check: {bad:?}",
             s.name
         );
@@ -415,5 +415,8 @@ fn the_tolerance_is_an_absolute_floor_that_grows_with_the_forward() {
         FORWARD_CONSISTENCY_RELATIVE_TOLERANCE * 0.05,
         epsilon = 0.0
     );
-    assert!(forward_consistency_tolerance(-0.05) == forward_consistency_tolerance(0.05));
+    assert_eq!(
+        forward_consistency_tolerance(-0.05),
+        forward_consistency_tolerance(0.05)
+    );
 }

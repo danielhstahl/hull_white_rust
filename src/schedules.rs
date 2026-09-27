@@ -49,13 +49,13 @@ pub fn get_coupon_times(
 ) -> Result<Vec<f64>, HullWhiteError> {
     validation::valuation_time(t)?;
     validation::positive("delta", delta)?;
-    Ok((1..(num_payments + 1))
+    Ok((1..=num_payments)
         .map(|index| get_time_from_t_index(index, t, delta))
         .collect())
 }
 
 pub(crate) fn get_time_from_t_index(index: usize, t: f64, delta: f64) -> f64 {
-    t + (index as f64) * delta
+    t + index as f64 * delta
 }
 
 #[cfg(test)]

@@ -408,7 +408,7 @@ impl<'a> HullWhite<'a> {
     /// ```
     ///
     /// Derivations: <https://www.math.nyu.edu/~alberts/spring07/Lecture5.pdf> and the
-    /// OpenGamma note
+    /// `OpenGamma` note
     /// <https://developers.opengamma.com/quantitative-research/Hull-White-One-Factor-Model-OpenGamma.pdf>,
     /// in whose notation the `t0` of the adjustment is this function's `option_maturity`.
     pub(crate) fn gamma_edf(&self, t: f64, option_maturity: f64, delta: f64) -> f64 {

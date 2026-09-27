@@ -28,13 +28,29 @@ use crate::HullWhite;
 use crate::error::HullWhiteError;
 use crate::validation;
 
+/// Positive part of `v` -- `max(v, 0)` with the NaN case stated rather than inherited silently.
+///
+/// This was `if v > 0.0 { v } else { 0.0 }`.  `f64::max` is *not* `NaN`-propagating: it
+/// returns the non-`NaN` operand, so `NaN.max(0.0)` is `0.0`, which is exactly what the
+/// comparison form produced too (every comparison against `NaN` is false, so NaN fell to the
+/// `else` arm).  The two agree bit-for-bit on every input, including the signed zeros: `-0.0`
+/// maps to `+0.0` either way.  The chosen behaviour is therefore "a non-positive or undefined
+/// payoff exercises nothing", and `max_or_zero_takes_the_positive_part_and_squashes_nan_to_zero`
+/// pins it, because `v.max(0.0)` reads as if it should propagate NaN and does not.
 fn max_or_zero(v: f64) -> f64 {
-    if v > 0.0 { v } else { 0.0 }
+    v.max(0.0)
 }
+
+/// The swaption payoff at a node: the swap value if it is in the money for this side, else zero.
+///
+/// A payer exercises when the swap is worth something to it (`swp > 0`); a receiver when the
+/// swap is worth something *against* it (`-swp > 0`).  Each side is just the positive part of
+/// the signed swap value.
 fn payoff_swaption(is_payer: bool, swp: f64) -> f64 {
-    match is_payer {
-        true => max_or_zero(swp),
-        false => max_or_zero(-swp),
+    if is_payer {
+        max_or_zero(swp)
+    } else {
+        max_or_zero(-swp)
     }
 }
 

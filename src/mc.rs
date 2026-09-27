@@ -240,7 +240,7 @@ pub const fn scale() -> Scale {
 pub fn rng_for(slot: u8) -> StdRng {
     let mut seed = [0u8; 32];
     let mut state = (slot as u64) ^ 0x9E37_79B9_7F4A_7C15;
-    for byte in seed.iter_mut() {
+    for byte in &mut seed {
         state ^= state >> 30;
         state = state.wrapping_mul(0xBF58_476D_1CE4_E5B9);
         state ^= state >> 27;
@@ -332,11 +332,11 @@ impl AntitheticMonteCarlo {
     /// a time, because the mirror path is only available if the increments are all materialised:
     /// an increment-at-a-time API could not reuse the same draws as their own negation.
     pub fn push_pair(&mut self, mut payoff: impl FnMut(&[f64]) -> f64) {
-        for slot in self.normals.iter_mut() {
+        for slot in &mut self.normals {
             *slot = StandardNormal.sample(&mut self.rng);
         }
         let first = payoff(&self.normals);
-        for slot in self.normals.iter_mut() {
+        for slot in &mut self.normals {
             *slot = -*slot;
         }
         let second = payoff(&self.normals);

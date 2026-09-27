@@ -94,16 +94,13 @@ pub(super) fn solve_v2(
         }
         None
     };
-    let (mut a, mut b) = match seed_root(seed) {
-        Some(range) => range,
-        None => {
-            return Err(rootfinder::SolverError::NoSignChange {
-                lower: seed,
-                upper: seed,
-                f_lower: f(seed),
-                f_upper: f(seed),
-            });
-        }
+    let Some((mut a, mut b)) = seed_root(seed) else {
+        return Err(rootfinder::SolverError::NoSignChange {
+            lower: seed,
+            upper: seed,
+            f_lower: f(seed),
+            f_upper: f(seed),
+        });
     };
     let mut f_a = f(a);
     let mut f_b = f(b);

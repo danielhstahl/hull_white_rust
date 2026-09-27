@@ -105,7 +105,7 @@ pub(super) fn grid() -> Vec<Case> {
     let mid: Vec<f64> = vec![2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0];
     let long: Vec<f64> = (1..=48).map(|i| 2.0 + 0.5 * i as f64).collect();
     let mut out = Vec::new();
-    for &(name, curr, a, b, sig) in fixtures.iter() {
+    for &(name, curr, a, b, sig) in &fixtures {
         for (sn, schedule) in [("c4", &short), ("c8", &mid), ("c48", &long)] {
             for strike in [0.5f64, 0.8, 0.95, 1.0, 1.05, 1.3, 3.0] {
                 out.push(Case {
@@ -140,7 +140,7 @@ pub(super) fn stress_grid() -> Vec<Case> {
     let short: Vec<f64> = vec![2.5, 3.0, 3.5, 4.0];
     let long: Vec<f64> = (1..=48).map(|i| 2.0 + 0.5 * i as f64).collect();
     let mut out = Vec::new();
-    for &(name, curr, a, b, sig) in fixtures.iter() {
+    for &(name, curr, a, b, sig) in &fixtures {
         for (sn, schedule) in [("c4", &short), ("c48", &long)] {
             for (ci, coupon_rate) in [("cp0.0001", 0.0001f64), ("cp5", 5.0), ("cp0.05", 0.05)] {
                 for strike in [1e-6f64, 0.01, 100.0, 1e6] {

@@ -54,9 +54,7 @@ impl Run {
         }
     }
     pub(super) fn width(&self) -> f64 {
-        self.bracket
-            .map(|(lo, hi)| (hi - lo).abs())
-            .unwrap_or(f64::NAN)
+        self.bracket.map_or(f64::NAN, |(lo, hi)| (hi - lo).abs())
     }
 }
 

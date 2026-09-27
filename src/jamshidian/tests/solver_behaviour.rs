@@ -41,7 +41,7 @@ fn the_bracket_actually_brackets() {
     //The analytic bracket has to straddle the critical rate: bond value above the strike at
     //the low end, below it at the high end, and the solved root in between.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let name = s.name;
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
@@ -149,7 +149,7 @@ fn a_forty_eight_coupon_schedule_prices_against_the_integral() {
     //deep OTM.  Still agrees with the direct payoff integral.
     let schedule: Vec<f64> = (1..=48).map(|i| 2.0 + 0.5 * i as f64).collect();
     assert_eq!(schedule.len(), 48);
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let name = s.name;
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();

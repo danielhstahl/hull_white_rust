@@ -187,7 +187,7 @@ impl<'a> HullWhite<'a> {
     /// `coupon_times[coupon_times.len() - 1]`, and that final payment is `coupon_rate + 1.0`.
     ///
     /// Two consequences worth naming, because both used to be documented backwards (the parameter
-    /// comment claimed the schedule "does not include the bond_maturity, but the function does
+    /// comment claimed the schedule "does not include the `bond_maturity`, but the function does
     /// check for that"; it neither excludes it nor checks it):
     ///
     /// * leave the maturity date out and you get a bond whose principal is repaid on the *last

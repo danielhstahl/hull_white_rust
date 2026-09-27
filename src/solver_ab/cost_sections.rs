@@ -100,10 +100,10 @@ pub(super) fn solver_ab_cost() {
         let h = 1e-5 * new.root.abs().max(1.0);
         let central = (f_check(new.root + h) - f_check(new.root - h)) / (2.0 * h);
         let analytic = d_check(new.root);
-        let d_ratio = if central != 0.0 {
-            analytic / central
-        } else {
+        let d_ratio = if central == 0.0 {
             f64::NAN
+        } else {
+            analytic / central
         };
 
         println!(
@@ -111,8 +111,8 @@ pub(super) fn solver_ab_cost() {
              {:.6e}\t{:.6e}\t{:.4}\t{}\t{}\t{}\t{}",
             case.label,
             reference.root,
-            new.bracket.map(|b| b.0).unwrap_or(f64::NAN),
-            new.bracket.map(|b| b.1).unwrap_or(f64::NAN),
+            new.bracket.map_or(f64::NAN, |b| b.0),
+            new.bracket.map_or(f64::NAN, |b| b.1),
             new.width(),
             new.iterations,
             new.f_calls,

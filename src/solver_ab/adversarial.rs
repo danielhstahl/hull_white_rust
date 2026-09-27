@@ -95,12 +95,8 @@ pub(super) fn old_solver_stress() {
             println!("   {}", names.join(", "));
         }
     }
+    println!("worst old root error vs reference: {worst_old_err:.3e} at {worst_old_case}");
     println!(
-        "worst old root error vs reference: {:.3e} at {}",
-        worst_old_err, worst_old_case
-    );
-    println!(
-        "most Newton passes the old solver needed: {old_iters_max} at {} (cap {MAX_ITER})",
-        old_iters_case
+        "most Newton passes the old solver needed: {old_iters_max} at {old_iters_case} (cap {MAX_ITER})"
     );
 }

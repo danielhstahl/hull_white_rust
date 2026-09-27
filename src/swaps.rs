@@ -98,7 +98,7 @@ impl<'a> HullWhite<'a> {
     /// sum of reset coupons plus principal collapse to the par it resets to.  The fixed leg has
     /// no such shortcut, because its coupon does not reset: that sum is [`HullWhite::annuity_t`].
     fn annuity_t(&self, r_t: f64, t: f64, start: f64, n: usize, delta: f64) -> f64 {
-        (1..(n + 1))
+        (1..=n)
             .map(|i| self.bond_price_t_raw(r_t, t, start + delta * (i as f64)))
             .sum::<f64>()
             * delta
@@ -141,9 +141,12 @@ impl<'a> HullWhite<'a> {
         //`swap_initiation + num_swap_payments * delta` *is* the swap's maturity -- the `i = n`
         //payment date, the one that carries the principal on top of its coupon -- not maturity
         //plus a period.
+        //One cast of the payment count into the time domain, named once instead of inline in the
+        //bond call: `swap_initiation` plus a full set of `delta` periods *is* the last payment
+        //date, i.e. the swap's maturity under the convention stated on `annuity_t`.
+        let swap_maturity = swap_initiation + num_swap_payments as f64 * delta;
         let par_at_start = self.bond_price_t_raw(r_t, t, swap_initiation);
-        let principal_at_maturity =
-            self.bond_price_t_raw(r_t, t, swap_initiation + (num_swap_payments as f64) * delta);
+        let principal_at_maturity = self.bond_price_t_raw(r_t, t, swap_maturity);
         validation::finish(
             "forward_swap_rate_t",
             (par_at_start - principal_at_maturity) / denominator_swap,
@@ -449,9 +452,10 @@ impl<'a> HullWhite<'a> {
         //Floating leg at par, less the fixed leg (K * annuity), less the principal repaid on the
         //last payment date -- which is also where the last coupon of the annuity falls, see
         //`annuity_t` for the convention and for why `num_swap_payments` needs no +1 here.
+        let swap_maturity = swap_start + num_swap_payments as f64 * delta;
         self.bond_price_t_raw(r_t, t, swap_start)
             - swap_rate * self.annuity_t(r_t, t, swap_start, num_swap_payments, delta)
-            - self.bond_price_t_raw(r_t, t, swap_start + delta * (num_swap_payments as f64))
+            - self.bond_price_t_raw(r_t, t, swap_maturity)
     }
     /// Returns price of a payer swaption at some future time t
     ///

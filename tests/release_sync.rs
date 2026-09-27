@@ -462,7 +462,7 @@ fn surface() -> Surface {
         let Some(j) = folded[i..].find(';') else {
             break;
         };
-        reexports.extend(use_names(&folded[i..i + j + 1]));
+        reexports.extend(use_names(&folded[i..=(i + j)]));
         from = i + j + 1;
     }
     for line in lib.lines() {
@@ -538,7 +538,7 @@ fn offenders(is_bad: impl Fn(&Item) -> bool) -> Vec<String> {
         // Undocumented functions are `missing_docs`' problem, not these checks'.
         .filter(|item| !item.doc.is_empty())
         .filter(|item| is_bad(item))
-        .map(|item| item.label())
+        .map(Item::label)
         .collect()
 }
 
@@ -559,9 +559,9 @@ fn readme_install_snippet_matches_the_crate_version() {
 
 #[test]
 fn readme_docs_rs_links_name_the_crate_version() {
+    const PREFIX: &str = "docs.rs/hull_white/";
     let version = crate_version();
     let readme = read(&root().join("README.md"));
-    const PREFIX: &str = "docs.rs/hull_white/";
     let mut stale = Vec::new();
     let mut checked = 0usize;
     for (offset, _) in readme.match_indices(PREFIX) {
@@ -718,11 +718,10 @@ fn the_public_surface_scan_is_not_degenerate() {
             item.path.to_string_lossy().contains("/mc.rs")
                 || item.path.to_string_lossy().contains("/validation.rs")
         })
-        .map(|item| item.label())
+        .map(Item::label)
         .collect::<Vec<_>>();
     assert!(
         internals.is_empty(),
-        "private-module internals ({:?}) are being treated as public API: module visibility changed",
-        internals
+        "private-module internals ({internals:?}) are being treated as public API: module visibility changed"
     );
 }

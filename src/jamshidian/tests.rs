@@ -197,7 +197,7 @@ fn the_forward_measure_drift_reproduces_the_bond_price() {
     //drift this is out by ~1e-4, which is exactly the size of error that was showing up in
     //every option comparison below until the measure was fixed.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let name = s.name;
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
@@ -232,7 +232,7 @@ fn jamshidian_matches_the_direct_payoff_integral() {
     //over the payoff that shares none of them.  The worst deviation across this whole grid is
     //about 2e-12.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let name = s.name;
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
@@ -264,7 +264,7 @@ fn a_fine_strike_ladder_around_the_money_matches_the_integral() {
     //At the money the price is most sensitive to the critical rate, so a fine ladder through
     //the ATM region is where a sloppy root shows up first.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let name = s.name;
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();

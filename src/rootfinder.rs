@@ -226,16 +226,13 @@ pub fn solve(
             bracket = Some((last_lo, last_hi, f_last_lo, f_last_hi));
         }
     }
-    let (mut a, mut b, mut f_a, mut f_b) = match bracket {
-        Some(bracket) => bracket,
-        None => {
-            return Err(SolverError::NoSignChange {
-                lower: last_lo,
-                upper: last_hi,
-                f_lower: f_last_lo,
-                f_upper: f_last_hi,
-            });
-        }
+    let Some((mut a, mut b, mut f_a, mut f_b)) = bracket else {
+        return Err(SolverError::NoSignChange {
+            lower: last_lo,
+            upper: last_hi,
+            f_lower: f_last_lo,
+            f_upper: f_last_hi,
+        });
     };
 
     let mut x = seed.clamp(a.min(b), a.max(b));

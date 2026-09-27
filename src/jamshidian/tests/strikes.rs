@@ -12,7 +12,7 @@ fn a_zero_strike_call_is_the_underlying_and_a_zero_strike_put_is_worthless() {
     //be a guaranteed RootFindingError.  What the answer has to be: the call is the present
     //value of the underlying, the put is nothing.
     let times = [2.5, 3.0, 3.5, 4.0];
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let name = s.name;
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();

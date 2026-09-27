@@ -137,11 +137,11 @@ fn a_straddling_schedule_matches_the_direct_payoff_integral() {
     //The headline check for the convention: the decomposition of the residual bond, against a
     //quadrature of the payoff the holder actually has.
     let strikes = [0.3f64, 0.7, 0.95, 1.0, 1.05, 1.3, 2.0];
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
-        for schedule in STRADDLING.iter() {
-            for &strike in strikes.iter() {
+        for schedule in &STRADDLING {
+            for &strike in &strikes {
                 for is_call in [true, false] {
                     assert_matches_payoff_integral(
                         &hull_white,
@@ -164,7 +164,7 @@ fn a_straddling_schedule_with_a_negative_coupon_rate_matches_the_integral() {
     //payment rather than on whatever happens to be the residual's last one.
     let curve = STEEP_CURVE.curve();
     let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
-    for schedule in STRADDLING.iter() {
+    for schedule in &STRADDLING {
         for coupon_rate in [-0.02f64, -0.005, -0.0001] {
             for strike in [0.5f64, 0.9, 0.95, 1.0, 1.2] {
                 for is_call in [true, false] {
@@ -185,15 +185,15 @@ fn a_straddling_schedule_with_a_negative_coupon_rate_matches_the_integral() {
 fn dropping_the_pre_expiry_coupons_cannot_change_the_price() {
     //Everything strictly before expiry is worth nothing on the expiry date, so dropping it is a
     //no-op: the full schedule and the post-expiry tail are the same instrument.
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
-        for schedule in STRADDLING.iter() {
+        for schedule in &STRADDLING {
             let tail = tail_only(schedule, U);
             if tail == *schedule {
                 continue; //nothing was dropped; nothing to compare
             }
-            for &strike in [0.7f64, 0.95, 1.0, 1.3].iter() {
+            for &strike in &[0.7f64, 0.95, 1.0, 1.3] {
                 let full_call = hull_white
                     .coupon_bond_call_t(R_T, T, U, schedule, COUPON_RATE, strike)
                     .unwrap();
@@ -221,12 +221,12 @@ fn a_coupon_on_the_expiry_date_is_a_strike_reduction() {
     //A payment settled exactly on the expiry date is worth its weight there whatever the rate does,
     //so pricing the schedule that carries it must equal pricing the residual against a strike
     //shrunk by that cash: (cash + R - K)^+ == (R - (K - cash))^+.
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let residual = &[2.25, 2.5, 3.0][..];
         let carrying_cash = &[2.0, 2.25, 2.5, 3.0][..];
-        for &strike in [0.7f64, 0.95, 1.0, 1.3].iter() {
+        for &strike in &[0.7f64, 0.95, 1.0, 1.3] {
             let folded_call = hull_white
                 .coupon_bond_call_t(R_T, T, U, carrying_cash, COUPON_RATE, strike)
                 .unwrap();
@@ -250,7 +250,7 @@ fn a_strike_at_or_below_the_expiry_cash_is_exercised_in_every_state() {
     //The cash settled on the expiry date is a floor on the deliverable that no rate can remove, so
     //at a strike at or below it the call is parity and the put is nothing, with nothing left to
     //solve for.  The quadrature checks the same thing from the payoff.
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
         let carrying_cash = &[2.0, 2.25, 2.5, 3.0][..];
@@ -300,13 +300,13 @@ fn a_straddling_schedule_agrees_with_a_short_rate_tree() {
     //over 100..400 steps is ~2e-4 and it shrinks monotonically with the step count, so 1e-3 is
     //the tolerance and the tree's own convergence is asserted separately.
     let strikes = [0.7f64, 0.95, 1.0, 1.3];
-    for s in FIXTURES.iter() {
+    for s in &FIXTURES {
         let curve = s.curve();
         let hull_white = HullWhite::new(s.a, s.sigma, &curve).unwrap();
-        for schedule in STRADDLING.iter() {
+        for schedule in &STRADDLING {
             let deliverable =
                 |rate: f64| deliverable_at_expiry(&hull_white, U, schedule, COUPON_RATE, rate);
-            for &strike in strikes.iter() {
+            for &strike in &strikes {
                 for is_call in [true, false] {
                     let priced = if is_call {
                         hull_white
@@ -379,7 +379,7 @@ fn an_all_post_expiry_schedule_is_untouched_by_the_convention() {
         (0.03, 0.40, 0.045, 0.005, 1.0, 0.15104793988617959, 0.0),
         (0.03, 0.40, 0.045, 0.005, 1.3, 0.0, 0.14294295284414782),
     ];
-    for &(curr, a, b, sigma, strike, call_expected, put_expected) in golden.iter() {
+    for &(curr, a, b, sigma, strike, call_expected, put_expected) in &golden {
         let curve = hw_curve(curr, a, b, sigma);
         let hull_white = HullWhite::new(a, sigma, &curve).unwrap();
         let call = hull_white

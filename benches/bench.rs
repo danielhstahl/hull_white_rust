@@ -32,7 +32,7 @@ fn bench_bond_t(bench: &mut Bencher) {
         hull_white
             .bond_price_t(curr_rate, future_time, maturity)
             .unwrap()
-    })
+    });
 }
 
 #[bench]
@@ -41,7 +41,7 @@ fn bench_bond_now(bench: &mut Bencher) {
     let maturity = 1.5;
     let curve = fixture.curve();
     let hull_white = hull_white::HullWhite::new(fixture.a, fixture.sigma, &curve).unwrap();
-    bench.iter(|| hull_white.bond_price_now(maturity).unwrap())
+    bench.iter(|| hull_white.bond_price_now(maturity).unwrap());
 }
 
 #[bench]
@@ -59,7 +59,7 @@ fn bench_coupon_bond_t(bench: &mut Bencher) {
         hull_white
             .coupon_bond_price_t(curr_rate, future_time, &coupon_times, coupon_rate)
             .unwrap()
-    })
+    });
 }
 
 #[bench]
@@ -76,7 +76,7 @@ fn bench_coupon_bond_now(bench: &mut Bencher) {
         hull_white
             .coupon_bond_price_now(&coupon_times, coupon_rate)
             .unwrap()
-    })
+    });
 }
 
 #[bench]
@@ -102,7 +102,7 @@ fn bench_swap_rate(bench: &mut Bencher) {
                 delta,
             )
             .unwrap()
-    })
+    });
 }
 
 #[bench]
@@ -153,7 +153,7 @@ fn bench_swaption_european(bench: &mut Bencher) {
                 swap_rate,
             )
             .unwrap()
-    })
+    });
 }
 
 #[bench]
@@ -191,5 +191,5 @@ fn bench_swaption_american(bench: &mut Bencher) {
                 200,
             )
             .unwrap()
-    })
+    });
 }

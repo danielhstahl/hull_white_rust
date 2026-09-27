@@ -190,7 +190,7 @@ pub struct ForwardInconsistency {
 pub fn max_forward_inconsistency(curve: &dyn YieldCurve) -> Option<ForwardInconsistency> {
     let yield_fn = |s: f64| curve.zero_yield(s);
     let mut worst: Option<ForwardInconsistency> = None;
-    for &t in CURVE_PROBE_TIMES.iter() {
+    for &t in &CURVE_PROBE_TIMES {
         //A non-finite derivative means the curve is not defined (or not smooth) at this
         //probe, which says nothing about the pair; skip rather than call it inconsistent.
         let derived = derivative(&yield_fn, t);

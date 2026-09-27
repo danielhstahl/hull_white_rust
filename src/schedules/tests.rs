@@ -34,7 +34,7 @@ fn test_get_num_payments_not_even() {
 
 /// Whole-number-of-period schedules that are NOT binary-representable.  The f64 quotient drifts to
 /// either side of the integer, and each direction broke differently under `== trunc()`:
-///   low  e.g. (1.1 - 0.1) / 0.1   = 9.999999999999998  -> is_exact flipped false, so the swap
+///   low  e.g. (1.1 - 0.1) / 0.1   = 9.999999999999998  -> `is_exact` flipped false, so the swap
 ///        got anchored at maturity - (n-1)*delta = 0.2 = t + delta, one period late
 ///   high e.g. (1.3000000000000003 - 0.1) / 0.1 = 12.000000000000002 -> floor+1 gave n+1,
 ///        one spurious payment period
@@ -119,10 +119,10 @@ fn test_get_coupon_times() {
     let delta = 0.25;
     let coupon_times = get_coupon_times(num_payments, t, delta).unwrap();
     let expected_coupon_times = [1.25, 1.5, 1.75, 2.0, 2.25];
-    coupon_times
-        .iter()
-        .zip(expected_coupon_times.iter())
-        .for_each(|(actual, expected)| assert_eq!(actual, expected))
+    //One whole-schedule assertion instead of `zip(..).for_each(|..| assert_eq!(..))`: on failure
+    //this prints both schedules side by side, so a drifted payment is visible rather than just
+    //"the first mismatch panicked".
+    assert_eq!(coupon_times, expected_coupon_times);
 }
 
 #[test]
@@ -131,5 +131,5 @@ fn test_get_coupon_times_no_payments() {
     let t = 1.0;
     let delta = 0.25;
     let coupon_times = get_coupon_times(num_payments, t, delta).unwrap();
-    assert_eq!(coupon_times.len(), 0);
+    assert!(coupon_times.is_empty(), "0 payments means no schedule");
 }

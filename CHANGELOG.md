@@ -287,6 +287,66 @@ sums are now one helper, and the convention it computes is written down on it.
   against future changes while the size of this one stays checked rather than
   remembered.
 
+### Changed — clippy policy written down, and the idioms it turned up
+
+Nothing here moves a price. Every numeric line the suite prints is identical before
+and after: a full `cargo test --all-features -- --nocapture` run was diffed against
+the pre-change one, and the MC budget reports, the Jamshidian error tables and the
+solver A/B dumps come out the same apart from PIDs, timings, the renamed test below
+and the doctest line numbers that shifted with the added lines. Test counts are
+unchanged: 150 lib + 16 + 8 integration + 59 doctests.
+
+* `Cargo.toml` gained a `[lints.clippy]` section beside the existing `[lints.rust]`,
+  so the style policy lives in the manifest — which every target is built through —
+  rather than in whichever file happened to carry an attribute. The posture is
+  **pedantic, minus a written list of exceptions**: `pedantic` is enabled at `warn`
+  with `priority = -1`, and both lint jobs already add `-D warnings`. The thirteen
+  lints this crate keeps at zero are also listed by name, so the enforced set stays
+  greppable and survives a future reshuffle of the group; the fifteen it does not
+  satisfy are each `allow`ed with the reason beside them — the four casting lints
+  (counts and tenors bounded by the instrument, not by the type), `float_cmp`
+  (tolerances go through `approx`; what is left compares exact values exactly),
+  `missing_errors_doc` (~110 boilerplate blocks that still could not check the
+  prose), `unreadable_literal` (golden values transcribed from reports, which
+  underscores would break the round trip on), `too_many_lines`,
+  `elidable_lifetime_names`, `manual_midpoint`, `similar_names` /
+  `many_single_char_names`, the two report-formatting lints and
+  `must_use_candidate`. A clippy upgrade that introduces a new pedantic lint now
+  arrives as a warning to adjudicate instead of as silence.
+* `trees::max_or_zero` is `v.max(0.0)` where it was `if v > 0.0 { v } else { 0.0 }`.
+  The two agree **bit-for-bit on every input, `NaN` and the signed zeros included**:
+  `f64::max` returns the non-`NaN` operand, and `NaN` failed the old comparison and
+  took the `else` arm too, so the NaN-semantics change this cleanup might have had
+  is not one. The choice — "a non-positive or undefined payoff exercises nothing" —
+  is stated in the function's doc comment, and
+  `trees::tests::max_or_zero_takes_the_positive_part_and_squashes_nan_to_zero`
+  pins `NaN`, `-0.0` and both infinities instead of only the two obvious cases.
+  `payoff_swaption`'s `match is_payer { true => .., false => .. }` is an `if`/`else`
+  (`clippy::match_bool`), and its test now also pins that a `NaN` swap value is an
+  exercise-nothing payoff on either side.
+* `num_swap_payments as f64` no longer appears inline in the bond calls of
+  `forward_swap_rate_t` and `swap_price_t_init_raw`: each binds
+  `let swap_maturity = <start> + n as f64 * delta` once, so the last payment date
+  is a named quantity matching the convention documented on `annuity_t` rather than
+  an expression re-derived at each call site.
+* `jamshidian::Side` carries `#[derive(Debug, Clone, Copy)]`. It is a two-variant
+  unit enum handed by value into the decomposition; making it `Copy` retires the
+  crate's last `needless_pass_by_value` without touching the call shape.
+* Mechanical idiom cleanup, machine-applied and then re-checked by hand: `for x in
+  &xs` for `xs.iter()`; inline format args; `map_or` / `is_ok_and` / `is_some_and`
+  for `map(..).unwrap_or(..)`; `(1..=n)` for `1..(n + 1)`; `let Some(..) = .. else`
+  for the two match-and-return destructures in `rootfinder::solve` and
+  `solver_ab::variants`; the `;` on unit-returning `bench.iter(..)` calls and on
+  macro assertion statements; declarations moved above the statements that follow
+  them; backticks on identifiers in doc comments.
+* Tests written the way they fail best.  `schedules::tests::test_get_coupon_times`
+  compared element-by-element through `zip(..).for_each(|..| assert_eq!(..))`, which
+  dies on the first mismatch with no context; it asserts the whole schedule against
+  the expected array now, so a failure prints both. Its sibling uses
+  `assert!(..is_empty())` rather than `assert_eq!(..len(), 0)`, and the one
+  `#[should_panic]` in the crate says which message it expects
+  (`expected = "budget exceeded"`) instead of accepting any panic at all.
+
 ### Notes
 
 * `html_root_url` is **not** set, deliberately. `#![html_root_url]` is no longer a

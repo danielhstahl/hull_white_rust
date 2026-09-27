@@ -162,9 +162,7 @@ fn tail_run(r: f64) -> u32 {
     };
     let tail_f = |x: f64| (-x).exp() - 1e-6;
     let tail_df = |x: f64| -(-x).exp();
-    solve_ratio(r, &tail_f, &tail_df, None, -100.0, &settings)
-        .map(|s| s.iterations)
-        .unwrap_or(u32::MAX)
+    solve_ratio(r, &tail_f, &tail_df, None, -100.0, &settings).map_or(u32::MAX, |s| s.iterations)
 }
 
 #[test]
