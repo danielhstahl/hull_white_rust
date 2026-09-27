@@ -1,3 +1,19 @@
+//! `cargo bench` targets behind the published benchmark trend
+//! (<https://danielhstahl.github.io/hull_white_rust/dev/bench/>).
+//!
+//! Two things the rest of the crate does not need and this one does:
+//!
+//! * `#![feature(test)]` — these are libtest `#[bench]` functions, so nightly only.
+//!   That is why CI lints this target in the nightly job and not on stable
+//!   (see `.github/workflows/lint.yml`).
+//! * `--features test-support` — `benches/` is compiled as its own crate and cannot
+//!   see `cfg(test)`, so the shared curve fixtures come from
+//!   `hull_white::test_support`: `cargo bench --features test-support`.
+//!
+//! Every bench reads its inputs from those fixtures, so what is timed is the same
+//! curve the unit tests assert against, not a copy of it.  This is a test-only
+//! target: a consumer's `cargo build` never compiles it, but `cargo bench` and the
+//! nightly lint job both do.
 #![feature(test)]
 extern crate test;
 

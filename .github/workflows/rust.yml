@@ -4,6 +4,11 @@ on:
   push:
     branches: [master, main]
 
+# The deploy credential here is `secrets.CARGO_TOKEN`, not the GitHub token; the
+# GitHub token is only used to read the repository out.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -11,8 +16,10 @@ jobs:
       matrix:
         rust: [stable]
     steps:
-      - uses: actions/checkout@v4
-      - uses: hecrj/setup-rust-action@v2
+      # Pinned to full commit SHAs; the version is the trailing comment.  See the
+      # pin table in .github/workflows/test.yml.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
         with:
           rust-version: ${{ matrix.rust }}
       - name: Build
@@ -21,5 +28,22 @@ jobs:
         run: cargo test --verbose
       - name: Document
         run: cargo doc
+
+      # Publish.  This step used to be
+      #
+      #     cargo publish --token ${{ secrets.CARGO_TOKEN }} --allow-dirty || true
+      #
+      # and the `|| true` made *every* failure invisible: expired token, rejected
+      # manifest, version already uploaded, compile error -- the deploy job went
+      # green regardless and nobody looked.  The logic now lives in
+      # .github/scripts/publish.sh under `set -euo pipefail`, so an unexpected
+      # failure is a red deploy, and the one tolerated case is stated in the script
+      # rather than swallowed: the version in Cargo.toml is already on crates.io
+      # (a push that did not bump `package.version`), which emits a ::warning::
+      # annotation so "skipped, not shipped" is a visible state instead of the
+      # default one.  `bash .github/scripts/publish.sh --dry-run` reproduces every
+      # check locally without uploading.
       - name: Publish
-        run: cargo publish --token ${{ secrets.CARGO_TOKEN }} --allow-dirty || true
+        env:
+          CARGO_TOKEN: ${{ secrets.CARGO_TOKEN }}
+        run: bash .github/scripts/publish.sh

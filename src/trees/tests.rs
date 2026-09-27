@@ -91,32 +91,58 @@ fn swaption_tree_at_t_is_bit_identical_to_pre_fix() {
     let num_swap_payments = 20;
     let delta = 0.25;
     let steps = 400;
-    //             name     r0     a     b     sig   eur payer        eur receiver     amer payer   amer receiver
-    let golden: [(&str, f64, f64, f64, f64, f64, f64, f64, f64); 2] = [
-        (
-            "legacy",
-            0.05,
-            0.05,
-            0.05,
-            0.01,
-            0.017330477644662997,
-            0.017329771203617984,
-            0.01834265355592532,
-            0.017797483448434452,
-        ),
-        (
-            "steep",
-            0.02,
-            0.2,
-            0.06,
-            0.03,
-            0.03597512274296273,
-            0.03597334589011368,
-            0.03781406402902323,
-            0.04452822113093644,
-        ),
+    /// One row of captured pre-fix values.  Named fields rather than a nine-slot
+    /// tuple: the tuple version tripped `clippy::type_complexity`, and an
+    /// unlabeled `(f64, f64, f64, f64, f64, f64, f64, f64)` is exactly the shape
+    /// in which two values can be swapped without anything noticing.
+    #[derive(Clone, Copy)]
+    struct GoldenRow {
+        name: &'static str,
+        r0: f64,
+        a: f64,
+        b: f64,
+        sig: f64,
+        eur_payer: f64,
+        eur_receiver: f64,
+        amer_payer: f64,
+        amer_receiver: f64,
+    }
+    let golden = [
+        GoldenRow {
+            name: "legacy",
+            r0: 0.05,
+            a: 0.05,
+            b: 0.05,
+            sig: 0.01,
+            eur_payer: 0.017330477644662997,
+            eur_receiver: 0.017329771203617984,
+            amer_payer: 0.01834265355592532,
+            amer_receiver: 0.017797483448434452,
+        },
+        GoldenRow {
+            name: "steep",
+            r0: 0.02,
+            a: 0.2,
+            b: 0.06,
+            sig: 0.03,
+            eur_payer: 0.03597512274296273,
+            eur_receiver: 0.03597334589011368,
+            amer_payer: 0.03781406402902323,
+            amer_receiver: 0.04452822113093644,
+        },
     ];
-    for (name, r0, a, b, sig, eur_p, eur_r, amer_p, amer_r) in golden {
+    for row in &golden {
+        let GoldenRow {
+            name,
+            r0,
+            a,
+            b,
+            sig,
+            eur_payer: eur_p,
+            eur_receiver: eur_r,
+            amer_payer: amer_p,
+            amer_receiver: amer_r,
+        } = *row;
         let curve = hw_curve(r0, a, b, sig);
         let hull_white = HullWhite::new(a, sig, &curve).unwrap();
         let swap_rate = hull_white

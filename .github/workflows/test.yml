@@ -2,6 +2,12 @@ name: rusttest
 
 on: [push, pull_request]
 
+# Least privilege: nothing in this workflow writes to the repository.  Coverage and
+# Coveralls consume the lcov file produced locally; the only token they pass is used
+# for read/metadata.  Explicit is better than inheriting whatever the org default is.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -10,8 +16,19 @@ jobs:
         rust: [stable, nightly]
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: hecrj/setup-rust-action@v2
+      # Third-party actions are pinned to a full commit SHA with the version in the
+      # trailing comment.  A tag ("v4") is mutable: the tag owner can move it and
+      # every CI run picks that up.  A branch ("@master", "@cargo-llvm-cov") is
+      # worse -- it is whatever someone pushed last.  The SHA is the commit that
+      # was verified when the pin was made; bump deliberately, in a PR that says so.
+      #   actions/checkout                          11d5960  v4.4.0
+      #   hecrj/setup-rust-action                   110f367  v2.0.1
+      #   taiki-e/install-action                    4cef141  v2.87.21
+      #   coverallsapp/github-action                8d6379e  v2.3.8
+      #   actions/cache                             caa2961  v5.1.0
+      #   benchmark-action/github-action-benchmark  fd31771  v1.9.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
         with:
           rust-version: ${{ matrix.rust }}
       - name: Build
@@ -31,7 +48,9 @@ jobs:
         run: cargo test --verbose --features slow -- --nocapture
       - name: Install cargo-llvm-cov
         if: matrix.rust == 'nightly'
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: cargo-llvm-cov
       - name: Run tests nightly with coverage
         if: matrix.rust == 'nightly'
         run: |
@@ -42,16 +61,29 @@ jobs:
         run: cargo doc
       - name: Coveralls
         if: matrix.rust == 'nightly'
-        uses: coverallsapp/github-action@v2
+        uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2.3.8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path-to-lcov: "lcov.info"
 
+  # `cargo bench` runs only on the default branch.  Two reasons:
+  #   * `fail-on-alert` compares against the last *committed* baseline; on a
+  #     feature branch that comparison is against unrelated code, so the alert is
+  #     noise, and `comment-on-alert` then posts that noise onto the PR.
+  #   * This job's sibling in `benchmark_ghpages.yml` force-pushes results to
+  #     `gh-pages`; unbounded branches running it means unreviewed code driving a
+  #     shared published branch.
+  # The `if:` is `github.event.repository.default_branch`, not a hardcoded
+  # `master`, so the gate survives a default-branch rename.
   bench:
+    name: bench (default branch only)
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     steps:
-      - uses: actions/checkout@v4
-      - uses: hecrj/setup-rust-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
         with:
           rust-version: nightly
 
@@ -59,13 +91,13 @@ jobs:
         run: cargo bench --features test-support | tee output.txt
 
       - name: Download previous benchmark data
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ./cache
           key: ${{ runner.os }}-benchmark
       # Run `github-action-benchmark` action
       - name: Store benchmark result
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c # v1.9.0
         with:
           # What benchmark tool the output.txt came from
           tool: "cargo"

@@ -1,0 +1,80 @@
+name: lint
+
+# PR-blocking style/lint gate.  Nothing else in this repository checks formatting or
+# clippy, so a `cargo fmt`-less commit merged quietly and the next person's diff
+# carried the reformat.
+#
+# To make these checks *required*, enable them in branch protection
+# (Settings → Branches → Require a pull request before merging → Required checks):
+#   * fmt
+#   * clippy (stable)
+#   * clippy --all-targets (nightly)
+# The workflow itself cannot set branch protection; it can only produce a status
+# that is worth requiring, which means it has to be green on a clean tree and red on
+# anything else.
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A pushed commit supersedes the lint run before it on the same ref; don't queue
+  # two of them behind each other.
+  group: lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned to full commit SHAs; version in the trailing comment.  Pin table is
+      # kept in .github/workflows/test.yml.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
+        with:
+          rust-version: stable
+          components: rustfmt
+      # `--all` covers every member of the workspace; `--check` exits non-zero with
+      # the diff instead of rewriting files.  Run `cargo fmt --all` locally to fix.
+      - name: cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
+        with:
+          rust-version: stable
+          components: clippy
+      # `-D warnings`: a clippy warning is a failure, not a scroll-past.  Every
+      # deliberate exception is a targeted `#[allow(clippy::...)]` at the item that
+      # needs it, with the reason next to it -- so the exceptions are countable and
+      # do not silently expand.
+      #
+      # Why `--lib --bins --tests` here and `--all-targets` in the nightly job:
+      # `--all-targets` includes `benches/`, and this crate's benches are `#[bench]`
+      # from libtest, which needs `#![feature(test)]` -- nightly only -- plus the
+      # `test-support` feature (see Cargo.toml).  On stable that target cannot
+      # compile, so stable lints lib + bins + tests and nightly adds the benches.
+      - name: cargo clippy (lib, bins, tests)
+        run: cargo clippy --lib --bins --tests --all-features -- -D warnings
+
+  clippy-all-targets:
+    name: clippy --all-targets (nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
+        with:
+          rust-version: nightly
+          components: clippy
+      # Same bar as the stable job, plus the bench target: benches are compiled and
+      # linted, they are not exempt just because they are not shipped.
+      - name: cargo clippy --all-targets (includes benches)
+        run: cargo clippy --all-targets --all-features -- -D warnings

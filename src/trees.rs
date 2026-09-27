@@ -22,6 +22,13 @@ fn payoff_swaption(is_payer: bool, swp: f64) -> f64 {
     }
 }
 impl<'a> HullWhite<'a> {
+    // The parameter list mirrors the swap leg being priced: current rate, clock,
+    // option maturity, number of payments, payment tenor, strike, payer side and
+    // tree resolution.  Collapsing it into a parameter struct would change the
+    // public `american_*_swaption_t` signatures (a breaking change on its own
+    // merits), so the lint is silenced at each item rather than the threshold
+    // being raised crate-wide -- which would keep the exceptions countable.
+    #[allow(clippy::too_many_arguments)]
     fn american_swaption(
         &self,
         r_t: f64,
@@ -80,6 +87,11 @@ impl<'a> HullWhite<'a> {
     /// This function uses a tree to solve and will take longer to compute
     /// than other pricing functions.
     ///
+    /// The parameter list mirrors the swap leg being priced -- current rate, clock,
+    /// option maturity, number of payments, payment tenor, strike, tree resolution.
+    /// Folding it into a parameter struct would change the public signature, so the
+    /// `too_many_arguments` allow on this item is deliberate, not unfinished work.
+    ///
     /// # Examples
     ///
     /// ```
@@ -100,6 +112,7 @@ impl<'a> HullWhite<'a> {
     ///     r_t, t, option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
     /// ).unwrap();
     /// ```
+    #[allow(clippy::too_many_arguments)]
     pub fn american_payer_swaption_t(
         &self,
         r_t: f64,
@@ -188,6 +201,11 @@ impl<'a> HullWhite<'a> {
     /// This function uses a tree to solve and will take longer to compute
     /// than other pricing functions.
     ///
+    /// The parameter list mirrors the swap leg being priced -- current rate, clock,
+    /// option maturity, number of payments, payment tenor, strike, tree resolution.
+    /// Folding it into a parameter struct would change the public signature, so the
+    /// `too_many_arguments` allow on this item is deliberate, not unfinished work.
+    ///
     /// # Examples
     ///
     /// ```
@@ -208,6 +226,7 @@ impl<'a> HullWhite<'a> {
     ///     r_t, t, option_maturity, num_swap_payments, delta, swap_rate, num_tree_steps
     /// ).unwrap();
     /// ```
+    #[allow(clippy::too_many_arguments)]
     pub fn american_receiver_swaption_t(
         &self,
         r_t: f64,
@@ -290,6 +309,8 @@ impl<'a> HullWhite<'a> {
             num_steps,
         )
     }
+    // See `american_swaption` for why the arity is allowed.
+    #[allow(clippy::too_many_arguments)]
     #[cfg(test)]
     fn european_swaption_tree(
         &self,

@@ -67,6 +67,43 @@ failed. Each is now stated as what the function returns.
   rendered PDF): 188 KiB, most of the published tarball, read by nothing on the
   Rust side. The directory stays in the repository and the README says where.
 
+### Changed — CI: pinned actions, publish failures that actually fail, a fmt/clippy gate
+
+CI ran on floating refs and swallowed the one failure that mattered.
+
+* Every third-party action is pinned to a full commit SHA with the version in a
+  trailing comment (`actions/checkout` v4.4.0, `hecrj/setup-rust-action` v2.0.1,
+  `taiki-e/install-action` v2.87.21, `actions/cache` v5.1.0,
+  `benchmark-action/github-action-benchmark` v1.9.0,
+  `coverallsapp/github-action` v2.3.8). `setup-rust-action` was on `@master` and
+  the benchmark workflow was on `actions/checkout@v2` while the others were on `v4`
+  — floating refs, so a stranger's push moved this repository's CI without a PR
+  here. The pin table is in [README.md](README.md#ci).
+* `cargo publish --token ... --allow-dirty || true` → `set -euo pipefail`, and the
+  one tolerated case narrowed and stated in the workflow: the version in
+  `Cargo.toml` is already on crates.io (a push that did not bump
+  `package.version`), which emits a `::warning::` annotation rather than passing
+  silently. An empty `CARGO_TOKEN` now fails explicitly; the tracked tree is
+  asserted clean before publish, so the retained `--allow-dirty` cannot be hiding
+  a modified tracked file.
+* New `lint.yml`: `cargo fmt --all -- --check` and `cargo clippy ... -D warnings`
+  as PR-blocking jobs (`fmt`, `clippy (stable)`,
+  `clippy --all-targets (nightly)` — the nightly run adds the bench target, which
+  needs `#![feature(test)]`). There was no style/lint job at all before, so
+  formatting and lint drift were unbounded. The warnings that existed when the gate
+  went up are fixed rather than allowed away; the only `allow`s are four
+  `clippy::too_many_arguments` on the swaption pricers, whose arity mirrors the
+  swap leg and changing which is a breaking API change in its own right.
+* `cargo bench` is restricted to the default branch in both bench jobs (gate is
+  `github.event.repository.default_branch`, not a hardcoded `master`), so an
+  unreviewed branch can no longer drive `contents: write` against the published
+  `gh-pages` trend or post a baseline-mismatch alert on an unrelated PR.
+* Badges: the CI badge pointed at `workflows/Rust/badge.svg` and no workflow is
+  named `Rust`; the coverage badge pointed at Codecov and nothing uploads there
+  (`test.yml` uploads `lcov.info` to Coveralls). Both replaced with badges for what
+  exists, each naming the default branch (`master`) explicitly.
+* `permissions: contents: read` added to the workflows that need nothing more.
+
 ### Notes
 
 * `html_root_url` is **not** set, deliberately. `#![html_root_url]` is no longer a

@@ -51,8 +51,11 @@ slow = []
 #
 # Off by default and `#[doc(hidden)]`: this is not part of the crate's public surface.  Unit tests
 # get the module through `cfg(test)`; `benches/` is a separate crate and cannot see `cfg(test)`, so
-# `cargo bench` turns this on (see .github/workflows/bench.yml) to build the benches off the same
-# fixture the tests use instead of a copy of it.
+# the bench command turns this on explicitly -- `cargo bench --features test-support` (cargo does
+# not infer it).  That is the exact command the bench jobs run, in
+# .github/workflows/benchmark_ghpages.yml and the `bench` job of .github/workflows/test.yml,
+# under nightly because the benches are libtest `#[bench]` functions (`#![feature(test)]`).
+# It builds the benches off the same fixture the tests use instead of a copy of it.
 test-support = []
 
 [dependencies]

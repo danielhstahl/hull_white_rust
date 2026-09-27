@@ -138,7 +138,7 @@ fn american_payer_swaption() {
             100,
         )
         .unwrap();
-    assert_eq!(analytical < tree, true);
+    assert!(analytical < tree);
 }
 
 #[test]
@@ -183,5 +183,5 @@ fn american_receiver_swaption() {
             100,
         )
         .unwrap();
-    assert_eq!(analytical < tree, true);
+    assert!(analytical < tree);
 }

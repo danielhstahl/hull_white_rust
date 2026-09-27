@@ -27,7 +27,7 @@ fn test_get_num_payments_not_even() {
     let delta = 0.4;
     let (num_payments, is_exact) = get_num_remaining_payments(t, maturity, delta);
     assert_eq!(num_payments, 4);
-    assert_eq!(is_exact, false);
+    assert!(!is_exact);
     let next_exchange_date = maturity - (num_payments as f64 - 1.0) * delta;
     assert_abs_diff_eq!(next_exchange_date, 0.8, epsilon = 0.0000001);
 }
@@ -118,7 +118,7 @@ fn test_get_coupon_times() {
     let t = 1.0;
     let delta = 0.25;
     let coupon_times = get_coupon_times(num_payments, t, delta).unwrap();
-    let expected_coupon_times = vec![1.25, 1.5, 1.75, 2.0, 2.25];
+    let expected_coupon_times = [1.25, 1.5, 1.75, 2.0, 2.25];
     coupon_times
         .iter()
         .zip(expected_coupon_times.iter())

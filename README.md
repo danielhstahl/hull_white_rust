@@ -1,11 +1,21 @@
-| [Linux][lin-link] |  [Codecov][cov-link]  |
-| :---------------: | :-------------------: |
-| ![lin-badge]      | ![cov-badge]          |
+| [CI (build + test)][ci-link] | [Lint (fmt + clippy)][lint-link] | [Coverage (Coveralls)][cov-link] |
+| :-------------------------: | :---------------------------: | :-----------------------------: |
+| ![ci-badge]                 | ![lint-badge]                 | ![cov-badge]                    |
 
-[lin-badge]: https://github.com/danielhstahl/hull_white_rust/workflows/Rust/badge.svg
-[lin-link]:  https://github.com/danielhstahl/hull_white_rust/actions
-[cov-badge]: https://codecov.io/gh/danielhstahl/hull_white_rust/branch/master/graph/badge.svg
-[cov-link]:  https://codecov.io/gh/danielhstahl/hull_white_rust
+<!-- Both badges name the default branch (`master`) explicitly rather than relying on
+     "whatever the default is".  The coverage badge is Coveralls, not Codecov:
+     `test.yml` runs `cargo llvm-cov` and uploads `lcov.info` to Coveralls, and
+     nothing in this repository ever uploaded to Codecov, so the Codecov badge had
+     no producer.  The CI badge used the legacy `/workflows/Rust/badge.svg` form and
+     no workflow here is named "Rust" (they are `rusttest`, `lint` and `bench`), so
+     it was broken; `/actions/workflows/<file>/badge.svg` keys off the file that
+     actually exists. -->
+[ci-link]:   https://github.com/danielhstahl/hull_white_rust/actions/workflows/test.yml?query=branch%3Amaster
+[ci-badge]:  https://github.com/danielhstahl/hull_white_rust/actions/workflows/test.yml/badge.svg?branch=master
+[lint-link]: https://github.com/danielhstahl/hull_white_rust/actions/workflows/lint.yml?query=branch%3Amaster
+[lint-badge]: https://github.com/danielhstahl/hull_white_rust/actions/workflows/lint.yml/badge.svg?branch=master
+[cov-link]:  https://coveralls.io/github/danielhstahl/hull_white_rust?branch=master
+[cov-badge]: https://coveralls.io/repos/github/danielhstahl/hull_white_rust/badge.svg?branch=master
 
 ## Hull White
 
@@ -133,3 +143,70 @@ on two grids, `dt` and `dt / 2`.  The sample size and grid resolution are tiered
 feature so the tight end of that curve is opt-in: a plain `cargo test` keeps a ~4s signal, and CI
 runs `--features slow` as well (the nightly coverage run uses `--all-features`, which includes it).
 See `src/mc.rs` for the harness, the step-size convention, and the measured numbers.
+
+## CI
+
+Four workflow files under [`.github/workflows`](.github/workflows):
+
+| File | Workflow | Triggers | Runs |
+| --- | --- | --- | --- |
+| [`test.yml`](.github/workflows/test.yml) | `rusttest` | every push and PR, `stable` + `nightly` | build, `cargo test`, heavy MC tier (`--features slow`), nightly `cargo llvm-cov` → Coveralls, `cargo doc` |
+| [`lint.yml`](.github/workflows/lint.yml) | `lint` | pushes to `master`/`main` and every PR | `cargo fmt --all -- --check`; `cargo clippy ... -D warnings` — on stable over lib + bins + tests, on nightly over `--all-targets`, which adds the benches |
+| [`benchmark_ghpages.yml`](.github/workflows/benchmark_ghpages.yml) | `bench` | **default branch only** (+ `workflow_dispatch`) | `cargo bench` → the published trend chart on `gh-pages` |
+| [`rust.yml`](.github/workflows/rust.yml) | `RustDeploy` | push to `master`/`main` | build, test, doc, `cargo publish` |
+
+**Required checks.** A job that runs is not a job that blocks. In
+Settings → Branches → *Require a pull request before merging* → *Required checks*, add
+`fmt`, `clippy (stable)` and `clippy --all-targets (nightly)`. The lint workflow
+produces a status worth requiring: green on a clean tree, red on any diff — no
+`continue-on-error`, nothing allowed to be yellow.
+
+**Why clippy runs twice.** `--all-targets` includes `benches/`, and those are
+libtest `#[bench]` functions needing `#![feature(test)]` — nightly only, plus
+`--features test-support` for the shared fixtures. So stable lints the crate that
+ships and nightly lints everything including the benches; neither is a subset of
+the other in what it can catch, because the lints themselves differ per toolchain.
+
+**`cargo bench` runs on the default branch only.** The `fail-on-alert` comparison
+is against the last *committed* baseline: on a feature branch it compares against
+unrelated code, so the alert is noise, and `comment-on-alert` posts that noise on
+the PR. The `gh-pages` variant force-pushes to a shared published branch, which is
+not something an unreviewed branch should get to do with `contents: write`. Both
+gate on `github.ref == format('refs/heads/{0}', github.event.repository.default_branch)`
+rather than a hardcoded `master`, so the gate follows the default branch if it is
+ever renamed instead of silently disabling.
+
+**Running the jobs before pushing.** `bash .github/scripts/ci_local.sh` runs each
+job's command locally and prints one PASS/FAIL/SKIP row per job — the branch-level
+dry run, without needing a push. `--list` prints the job names, `--bench` actually
+runs the benches (compile-only otherwise, since timings from shared hardware are
+not the number the trend wants). A missing tool is a SKIP with a reason, never a
+PASS. The deploy path is dry-runnable on its own:
+`bash .github/scripts/publish.sh --dry-run` runs every check the real publish runs
+and stops at `cargo publish --dry-run` — nothing is uploaded and no token needed.
+
+**Action pins.** Every third-party action is pinned to a full commit SHA with the
+version in a trailing comment. A tag like `@v4` is mutable — the owner can move it
+under this repository — and `@master` is worse: each run takes whatever whoever
+pushed last. That is a supply-chain exposure, so the pins are recorded here and are
+meant to move deliberately, in a commit that says why:
+
+| Action | Version | Commit |
+| --- | --- | --- |
+| `actions/checkout` | v4.4.0 | `11d5960a326750d5838078e36cf38b85af677262` |
+| `hecrj/setup-rust-action` | v2.0.1 | `110f36749599534ca96628b82f52ae67e5d95a3c` |
+| `taiki-e/install-action` | v2.87.21 | `4cef1412cce204788f482e778a0b9187f9626a29` |
+| `actions/cache` | v5.1.0 | `caa296126883cff596d87d8935842f9db880ef25` |
+| `benchmark-action/github-action-benchmark` | v1.9.0 | `fd31771ce86cc65eab85653da103f71ab1b4479c` |
+| `coverallsapp/github-action` | v2.3.8 | `8d6379e14d29928660c4ba802d8e85393440b329` |
+
+Each SHA was resolved from the tag it names (`git ls-remote` and the refs API) at
+the time of pinning. To bump one, change the SHA and the version comment together.
+
+**Publish failures are loud.** `cargo publish` used to end in `|| true`, which made
+every failure invisible: expired token, rejected manifest, version already
+published — the deploy job reported success either way. It now runs under
+`set -euo pipefail`, and the single tolerated case is spelled out in the workflow:
+the version in `Cargo.toml` is already on crates.io, meaning the push did not bump
+`package.version`. That path emits a `::warning::` annotation on the run, so
+"skipped, not shipped" is a visible state rather than the default one.

@@ -238,8 +238,8 @@ fn doc_blocks(lines: &[&str]) -> HashMap<usize, Vec<String>> {
             attr_depth += bracket_delta(line);
             continue;
         }
-        if line.starts_with("///") {
-            pending.push(line[3..].trim().to_string());
+        if let Some(doc) = line.strip_prefix("///") {
+            pending.push(doc.trim().to_string());
             continue;
         }
         if line.is_empty() {
