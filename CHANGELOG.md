@@ -1,5 +1,81 @@
 # Changelog
 
+All notable changes to this crate are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). The per-release
+procedure — what gets renamed, bumped and re-linked, in order — is in
+[README.md](README.md#doc-and-version-bookkeeping), and
+[`tests/release_sync.rs`](tests/release_sync.rs) fails the build if a step is
+skipped.
+
+## [Unreleased]
+
+Intended next release: **0.9.1** — documentation and packaging only. No pricing
+code changes; every price is the number it was in 0.9.0.
+
+### Fixed — documentation that contradicted the code
+
+Copy/paste drift in doc comments: the sentences were present, and wrong, so nothing
+failed. Each is now stated as what the function returns.
+
+* `mu_r` carried `t_forward_bond_vol`'s summary line ("Returns volality of bond
+  under the t-forward measure"). It returns the **conditional mean of the short
+  rate**, `E[r(t_m) | r(t) = r_t]`; the doc now gives the mean-reversion formula,
+  names `phi`, and cross-links the two things a reader might actually have been
+  after (`variance_r`, `t_forward_bond_vol`).
+* The misspelling "volality" (twice, both in that shared sentence) is gone;
+  `grep -rn volality src` is now empty and
+  `tests/release_sync.rs::no_volality_typos_in_src` keeps it empty.
+* `euro_dollar_future_now` promised a price "at some future time" on a function
+  whose whole point is that the valuation is today and the state comes from the
+  calibration. Restated, with the two-bond-bracket construction of the futures
+  rate and an assertion that it equals the `t = 0` case of `euro_dollar_future_t`.
+* `european_receiver_swaption_t` opened with "Returns price of a **payer**
+  swaption". It is the receiver side: a call, struck at par, on the deliverable
+  coupon bond. The summary now says receiver, and the example asserts the
+  payer/receiver spread against the forward swap rate so the sign is not a matter
+  of trusting the prose.
+* `coupon_bond_price_now`'s `coupon_times` parameter comment said the schedule
+  "does not include the bond_maturity, but the function does check for that" — it
+  does neither. The kernel adds the par value to the **last** element of the
+  slice, so the maturity is *in* the schedule: `coupon_times[len - 1]` is the
+  maturity and its payment is `coupon_rate + 1.0`. Both the doc comment and the
+  inline parameter comment now say so, and the doctest pins the convention three
+  ways (coupons-plus-principal decomposition, a one-element schedule pricing as a
+  zero coupon bond, and a repeated maturity date being refused rather than paid
+  twice).
+* `get_coupon_times` had no doc comment at all.
+
+### Added — enforcement, so this cannot quietly drift again
+
+* `[lints.rust] missing_docs = "deny"` in `Cargo.toml`. Declared in the manifest
+  rather than as `#![deny(missing_docs)]` in `src/lib.rs` so it covers every target
+  cargo builds through that manifest (lib, doctests, benches), not just the one
+  file carrying the attribute. `pub(crate)` internals are exempt — they are not the
+  API.
+* `tests/release_sync.rs`: README install snippet and every versioned `docs.rs`
+  link checked against `package.version`; CHANGELOG required to carry a section for
+  the released version **and** an empty `## [Unreleased]` for the next one; and
+  mechanical doc-shape rules over `src/` for the patterns that caused the above —
+  a `*_now` pricer summarised as pricing at a future date, a swaption summary
+  naming the opposite side of the trade, the "volality" misspelling, and public
+  functions whose summary line is too short to say what is being priced. Runs
+  under plain `cargo test`.
+* `Cargo.toml`: `keywords`, `categories`, and `rust-version = "1.85"` (the
+  `edition = "2024"` floor — nothing in the crate needs more today).
+* `package.exclude` for `documentation/` (R Sweave / LaTeX source and the
+  rendered PDF): 188 KiB, most of the published tarball, read by nothing on the
+  Rust side. The directory stays in the repository and the README says where.
+
+### Notes
+
+* `html_root_url` is **not** set, deliberately. `#![html_root_url]` is no longer a
+  recognised rustc attribute — adding it fails the build with "cannot find
+  attribute" — and the doc root is supplied by whoever hosts the built docs
+  (`docs.rs` sets its own), with cross-crate links resolved by rustdoc's
+  `--extern-html-root-url` at build time. There is no version-pinned URL left to
+  rot, which was the point.
+
 ## 0.9.0 — one curve object (breaking)
 
 ### The decision

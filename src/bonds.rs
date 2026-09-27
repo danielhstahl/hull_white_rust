@@ -119,7 +119,12 @@ impl<'a> HullWhite<'a> {
     pub(crate) fn bond_price_now_raw(&self, bond_maturity: f64) -> f64 {
         self.curve().discount(bond_maturity)
     }
-    /// Returns price of a coupon bond at some future date
+    /// Price of a coupon bond at some future date `t`, given the short rate observed there.
+    ///
+    /// Same schedule convention as [`HullWhite::coupon_bond_price_now`]: `coupon_times` holds every
+    /// payment date still to come, in strictly increasing order, **with the bond's maturity as the
+    /// last element** — that last date is where the par value is added, so a schedule that stops one
+    /// payment short repays principal a coupon period early.
     ///
     /// # Examples
     ///
@@ -175,24 +180,62 @@ impl<'a> HullWhite<'a> {
             &|r_t: f64, t: f64, bond_maturity: f64| self.bond_price_t_deriv(r_t, t, bond_maturity),
         )
     }
-    /// Returns price of a coupon bond at current date
+    /// Price of a coupon bond at the current date.
+    ///
+    /// # The schedule convention: the last coupon time *is* the bond maturity
+    ///
+    /// `coupon_times` must contain every remaining payment date **including** the maturity date, in
+    /// strictly increasing order.  The kernel adds the `1.0` of par value to the **last** element
+    /// of the slice and coupons to all of them, so the maturity is not a separate argument — it is
+    /// `coupon_times[coupon_times.len() - 1]`, and that final payment is `coupon_rate + 1.0`.
+    ///
+    /// Two consequences worth naming, because both used to be documented backwards (the parameter
+    /// comment claimed the schedule "does not include the bond_maturity, but the function does
+    /// check for that"; it neither excludes it nor checks it):
+    ///
+    /// * leave the maturity date out and you get a bond whose principal is repaid on the *last
+    ///   coupon* date, i.e. one coupon period early, with no diagnostic;
+    /// * repeat the maturity date and you are asking to be paid the principal twice — which the
+    ///   strictly-increasing requirement on the schedule refuses outright rather than pricing.
     ///
     /// # Examples
     ///
     /// ```
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
-    /// let coupon_times = vec![1.25, 1.5, 1.75, 2.0]; //measure time from now (0), all should be greater than t.  Final coupon is the bond maturity
     /// let coupon_rate = 0.05;
+    /// //Three dates, quarterly-ish; the last one is the maturity, not "one before it".
+    /// let coupon_times = vec![1.0, 1.5, 2.0];
     /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
     /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
     /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
     /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
-    /// let bond_price = hull_white.coupon_bond_price_now(&coupon_times, coupon_rate).unwrap();
+    /// let price = hull_white
+    ///     .coupon_bond_price_now(&coupon_times, coupon_rate)
+    ///     .unwrap();
+    /// //Discount every coupon off the curve; only the final date also carries the principal.
+    /// let coupons_only = coupon_rate
+    ///     * (hull_white.bond_price_now(1.0).unwrap()
+    ///         + hull_white.bond_price_now(1.5).unwrap()
+    ///         + hull_white.bond_price_now(2.0).unwrap());
+    /// let expected = coupons_only + 1.0 * hull_white.bond_price_now(2.0).unwrap();
+    /// assert!((price - expected).abs() < 1e-12, "{price} vs {expected}");
+    /// //So a bond whose schedule is just its maturity is a zero coupon bond, priced identically.
+    /// let zero = hull_white.coupon_bond_price_now(&[2.0], 0.0).unwrap();
+    /// assert!((zero - hull_white.bond_price_now(2.0).unwrap()).abs() < 1e-12);
+    /// //And a repeated date is refused, not silently paid twice.
+    /// assert!(
+    ///     hull_white
+    ///         .coupon_bond_price_now(&[1.0, 1.5, 2.0, 2.0], coupon_rate)
+    ///         .is_err()
+    /// );
     /// ```
     pub fn coupon_bond_price_now(
         &self,
-        coupon_times: &[f64], //does not include the bond_maturity, but the function does check for that
+        //Every remaining payment date, strictly increasing, with the bond maturity as the LAST
+        //element: `coupon_bond_generic_now` adds the par value to that last date, so the maturity
+        //is a member of the schedule rather than a separate argument (see the doc comment above).
+        coupon_times: &[f64],
         coupon_rate: f64,
     ) -> Result<f64, HullWhiteError> {
         validation::finite("coupon_rate", coupon_rate)?;

@@ -411,20 +411,42 @@ impl<'a> HullWhite<'a> {
             ),
         )
     }
-    /// Returns price of a Euro Dollar Future at some future time
+    /// Price of a Eurodollar future at the current date (today, `t = 0`).
+    ///
+    /// Same contract as [`HullWhite::euro_dollar_future_t`] with the valuation collapsed to today:
+    /// the state is not an argument, it is the calibration, so `r_t = r(0)`
+    /// ([`HullWhite::short_rate_now`]) and the delivery date `option_maturity` is measured from now.
+    /// The future is quoted on the Libor rate for the period starting at delivery, so the
+    /// instrument is priced off the two zero-coupon prices that bracket that period
+    /// (`option_maturity` and `option_maturity + delta`), which is why nothing here needs a rate at
+    /// all: `P(0, T)` and `P(0, T + delta)` come straight off the curve.
     ///
     /// # Examples
     ///
     /// ```
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
-    /// let option_maturity = 1.5;
+    /// let option_maturity = 1.5; //delivery date, measured from today
     /// let delta = 0.25; //delta is the tenor of the Libor rate
     /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
     /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
     /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
     /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let edf = hull_white.euro_dollar_future_now(option_maturity, delta).unwrap();
+    /// //The number returned is the futures rate itself (the convexity-adjusted Libor), not the
+    /// //100-based index quote: it is a rate, so small and positive on a positive-rate curve.
+    /// assert!(edf > 0.0 && edf < 0.5, "{edf}");
+    /// //Futures settle daily against a falling-then-rising margin, which is worth a positive
+    /// //convexity adjustment over the plain forward: the future is higher than forward Libor.
+    /// let fwd = hull_white
+    ///     .forward_libor_rate_now(option_maturity, delta)
+    ///     .unwrap();
+    /// assert!(edf > fwd, "{edf} vs {fwd}");
+    /// //"Now" is exactly the `t = 0` case of the state-ful twin.
+    /// let via_t = hull_white
+    ///     .euro_dollar_future_t(hull_white.short_rate_now().unwrap(), 0.0, option_maturity, delta)
+    ///     .unwrap();
+    /// assert!((edf - via_t).abs() < 1e-12, "{edf} vs {via_t}");
     /// ```
     pub fn euro_dollar_future_now(
         &self,
@@ -506,7 +528,15 @@ impl<'a> HullWhite<'a> {
             compute_libor_rate(nearest_bond, farthest_bond, delta),
         )
     }
-    /// Returns Libor rate at some future time
+    /// Spot Libor rate at `t`: the rate fixed at `t` for borrowing over `[t, t + delta]`.
+    ///
+    /// The fixing itself, not a forecast of it: this is
+    /// [`forward_libor_rate_t`](HullWhite::forward_libor_rate_t) with the period starting on the
+    /// valuation date, so the near leg is `P(t, t) = 1` and the rate reduces to
+    /// `(1 / delta) * (1 / P(t, t + delta) - 1)` under the state `r(t) = r_t`.  The `now` case of
+    /// the same fixing — no state argument, read straight off the initial curve — is
+    /// [`HullWhite::libor_rate_now`], and a period that starts later than the valuation date is the
+    /// forward, not this.
     ///
     /// # Examples
     ///

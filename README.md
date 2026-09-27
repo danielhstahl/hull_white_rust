@@ -13,7 +13,21 @@ This library implements functions that price fixed income products assuming that
 
 ## Documentation
 
-The [Documentation](./documentation) holds the model documentation for the various pricing functions and assumptions.  Library (API) documentation is available at [docs.rs](https://docs.rs/hull_white/0.6.0/hull_white/)
+The [Documentation](./documentation) directory holds the model documentation for the various pricing
+functions and assumptions: R Sweave / LaTeX source plus its rendered PDF.  It lives in the
+repository only — `package.exclude` in `Cargo.toml` keeps it out of the published crate, because the
+rendered PDF is most of the tarball and nothing on the Rust side reads it.
+
+Library (API) documentation is at
+[docs.rs](https://docs.rs/hull_white/0.9.0/hull_white/), built from `cargo doc` on publish.  To
+read it locally:
+
+```bash
+cargo doc --open --no-deps
+```
+
+Every documented example in the crate is a doctest, so `cargo test` compiles and runs the API docs
+along with the unit tests — prose that stops matching the code fails the build rather than drifting.
 
 ## Requirements
 
@@ -24,6 +38,42 @@ The documentation is written in [R Sweave](https://www.r-bloggers.com/getting-st
 Add the following package to your Cargo.toml:
 
 `hull_white = "0.9.0"`
+
+## Doc and version bookkeeping
+
+Three things are kept honest at compile time rather than in review:
+
+* **`#![deny(missing_docs)]`**, declared as `[lints.rust] missing_docs = "deny"` in `Cargo.toml` so
+  it covers every target cargo builds through this manifest.  Anything `pub` and reachable from the
+  crate root without a doc comment is a build error.  `pub(crate)` items are exempt — they are not
+  the API.
+* **The MSRV** is `rust-version = "1.85"` in `Cargo.toml`: the `edition = "2024"` floor.  CI builds
+  `stable` and `nightly`; raise the field only when the code actually needs more, and say so in
+  `CHANGELOG.md`.
+* **`html_root_url` is deliberately absent.**  `#![html_root_url]` is no longer a recognised rustc
+  attribute — adding it fails the build with "cannot find attribute" — and the doc root is supplied
+  by whatever hosts the built docs (`docs.rs` sets it itself), with inter-crate links resolved via
+  rustdoc's `--extern-html-root-url` at build time.  There is nothing version-pinned to maintain
+  here, which is the point: a hardcoded one in the sources is exactly the kind of number this crate
+  used to let go stale.
+
+The version string itself is read by cargo from one place, `package.version` in `Cargo.toml`, and
+written by hand in two: the install snippet above, and the versioned docs.rs link above.  Those two
+are the ones that rot quietly — they sat on `0.6.0` long after the crate left it — so
+[`tests/release_sync.rs`](tests/release_sync.rs) reads `Cargo.toml` and asserts that the README
+snippet matches `package.version`, that every `docs.rs/hull_white/<version>/` link in the README
+names `package.version`, that `CHANGELOG.md` carries a section for the released version **and** an
+`## [Unreleased]` section for the next one, and that the doc comments still describe what the code
+does (`*_now` pricers are not summarised as pricing at a future date; a `receiver` function is not
+summarised as the payer side; the misspelling that used to appear twice in `src/model.rs` is gone).
+It runs under plain `cargo test`, so CI fails on a release that bumped the crate and forgot the
+docs.  The per-release sequence is:
+
+1. `CHANGELOG.md`: rename `## [Unreleased]` to `## <new version> - <date>`, add a fresh empty
+   `## [Unreleased]` above it.
+2. `Cargo.toml`: bump `package.version`.
+3. `README.md`: the install snippet and the docs.rs link.  `cargo test` names each of these that is
+   still wrong, so step 3 is the test going green rather than a memory exercise.
 
 ## The curve
 

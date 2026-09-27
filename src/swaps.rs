@@ -100,7 +100,14 @@ impl<'a> HullWhite<'a> {
         let r_t = self.short_rate_now()?;
         self.forward_swap_rate_t(r_t, t, swap_initiation, num_swap_payments, delta)
     }
-    /// Returns swap rate at some future time
+    /// Swap rate at time `t` for the swap that starts at `t`, given the short rate `r(t) = r_t`.
+    ///
+    /// The spot swap rate as seen from `t`: [`HullWhite::forward_swap_rate_t`] with
+    /// `swap_initiation == t`, so the fixed leg is the coupon bond running from `t` and the rate is
+    /// the one that makes the swap worth zero at that moment.  Rate, not price — for the value of a
+    /// swap already struck at some other rate use [`HullWhite::swap_price_t`].  The same quantity
+    /// from today, with the state coming from the calibration rather than an argument, is
+    /// [`HullWhite::swap_rate_now`].
     ///
     /// # Examples
     ///
@@ -135,7 +142,7 @@ impl<'a> HullWhite<'a> {
             delta,
         )
     }
-    /// Returns swap rate at current time
+    /// Today's spot swap rate: the fixed rate that values a swap starting today at zero.
     ///
     /// The swap starting today, priced with [`HullWhite::forward_swap_rate_now`] — the `now` twin of
     /// [`HullWhite::swap_rate_t`].
@@ -427,24 +434,59 @@ impl<'a> HullWhite<'a> {
         let r_t = self.short_rate_now()?;
         self.european_payer_swaption_t(r_t, t, option_maturity, num_swap_payments, delta, swap_rate)
     }
-    /// Returns price of a payer swaption at some future time t
+    /// Price of a **receiver** swaption at some future time `t`.
+    ///
+    /// The holder has the right, at `option_maturity`, to enter the swap as the **fixed-rate
+    /// receiver** (and floating payer).  Worth having when the fixed rate they will lock in beats
+    /// the forward swap rate, i.e. when the fixed-coupon bond they are about to be long is worth
+    /// more than par — which is exactly why this is a **call** on that coupon bond:
+    /// `max(Bond(swap_rate * delta) - 1, 0)`, struck at par, on the schedule
+    /// `get_coupon_times(num_swap_payments, option_maturity, delta)`.  Mirror image of
+    /// [`HullWhite::european_payer_swaption_t`], which is the corresponding put.
     ///
     /// # Examples
     ///
     /// ```
-    /// let r_t = 0.04; //current rate
+    /// let r_t = 0.04; //short rate observed at t
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let t = 1.0; //time from "now" (0) to start valuing the bond
     /// let option_maturity = 2.0;
     /// let num_swap_payments = 16;
     /// let delta = 0.25; //delta is the tenor of the Libor rate
-    /// let swap_rate = 0.04; //the swap rate is what the payer agrees to pay if option is exercised
     /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
     /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
     /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
     /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
-    /// let swaption = hull_white.european_receiver_swaption_t(r_t, t, option_maturity, num_swap_payments, delta, swap_rate).unwrap();
+    /// //The rate the receiver is indifferent at: the forward swap rate of the swap the option
+    /// //delivers.  Everything below is stated against that rather than a hard-coded strike, so it
+    /// //stays true whatever curve the model is calibrated to.
+    /// let atm = hull_white
+    ///     .forward_swap_rate_t(r_t, t, option_maturity, num_swap_payments, delta)
+    ///     .unwrap();
+    /// let receiver = |strike: f64| {
+    ///     hull_white
+    ///         .european_receiver_swaption_t(
+    ///             r_t, t, option_maturity, num_swap_payments, delta, strike,
+    ///         )
+    ///         .unwrap()
+    /// };
+    /// let payer = |strike: f64| {
+    ///     hull_white
+    ///         .european_payer_swaption_t(r_t, t, option_maturity, num_swap_payments, delta, strike)
+    ///         .unwrap()
+    /// };
+    /// //Above the forward the receiver is in the money: they lock in a fixed rate richer than the
+    /// //market's, and the fixed-coupon bond they receive is worth more than the par they pay.
+    /// assert!(receiver(atm + 0.01) > payer(atm + 0.01));
+    /// //Below it the trade is worth more to the payer.
+    /// assert!(receiver(atm - 0.01) < payer(atm - 0.01));
+    /// //At the forward the two sides are worth the same: `receiver - payer` is the call-put spread
+    /// //on the deliverable, which is its forward price minus the par strike, and that is zero here.
+    /// assert!((receiver(atm) - payer(atm)).abs() < 1e-12);
+    /// //Being paid a higher fixed rate is monotonically better for a receiver, worse for a payer.
+    /// assert!(receiver(atm + 0.01) > receiver(atm - 0.01));
+    /// assert!(payer(atm + 0.01) < payer(atm - 0.01));
     /// ```
     pub fn european_receiver_swaption_t(
         &self,

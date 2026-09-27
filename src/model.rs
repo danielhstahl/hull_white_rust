@@ -58,7 +58,11 @@ impl core::fmt::Debug for HullWhite<'_> {
 }
 
 impl<'a> HullWhite<'a> {
-    /// Calibrate a model to one curve.
+    /// Calibrate a model: a mean-reversion speed, a volatility, and one term structure.
+    ///
+    /// The two parameters are the model's own dynamics (`dr = [theta(t) - a r] dt + sigma dW`);
+    /// the curve is what pins `theta(t)`, so a `HullWhite` is meaningless without one and the
+    /// calibration is a constructor argument rather than a later setter.
     ///
     /// `a` and `sigma` are checked for positivity and finiteness, and the curve is checked for
     /// internal consistency: `forward(t)` must equal `d/dt zero_yield(t)` at every time in
@@ -93,7 +97,7 @@ impl<'a> HullWhite<'a> {
         })
     }
 
-    /// The curve this model is calibrated to.
+    /// The initial term structure this model was calibrated to, as a borrow.
     ///
     /// Read-only access to the term structure the prices come off: `discount(t)` for `P(0,t)`,
     /// `zero_yield(t)` for the cumulative yield, `forward(t)` for the instantaneous forward
@@ -228,23 +232,46 @@ impl<'a> HullWhite<'a> {
         }
         Ok(())
     }
-    /// Returns volality of bond under the t-forward measure.
+    /// Volatility of the `t_m`-maturity bond price under the `t_f`-forward measure.
+    ///
+    /// This is the Black volatility of the underlying of a bond option: valued at `t`, the bond that
+    /// matures at `t_m` is the asset, the option expires at `t_f`, and pricing that option under the
+    /// `t_f`-maturity numeraire makes the bond price a lognormal martingale whose sigma is the
+    /// number returned here.  It is what feeds the Black / Jamshidian leg strike, not a moment of
+    /// the short rate — for those see [`HullWhite::mu_r`] (mean) and [`HullWhite::variance_r`]
+    /// (variance).
+    ///
+    /// The two time gaps do different things to it: `t_m - t` sets how volatile the bond price is
+    /// while the option is alive, and `t_f - t_m` scales that down as the option expiry approaches
+    /// the bond's own maturity — a bond that matures on (or before) the expiry date has a known
+    /// price at expiry, so its forward-measure volatility goes to zero there.  Hence both
+    /// `t_m > t` and `t_f > t_m` are required: outside them the expression is not a volatility at
+    /// all, and it is refused rather than returned as a negative or zero number that Black will
+    /// still happily swallow.
     ///
     /// # Examples
     ///
     /// ```
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
-    /// let t = 1.0;
-    /// let t_m = 2.0;
-    /// let t_f = 3.0;
+    /// let t = 1.0; //valuation date, measured from "now" (0)
+    /// let t_m = 2.0; //maturity of the bond that is the option's underlying
+    /// let t_f = 3.0; //option expiry == the numeraire's maturity
     /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
     /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
     /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
-    /// let hull_white= hull_white::HullWhite::new(a, sigma, &curve).unwrap();
-    /// let bond_vol = hull_white.t_forward_bond_vol(
-    ///     t, t_m, t_f
-    /// ).unwrap();
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
+    /// let bond_vol = hull_white
+    ///     .t_forward_bond_vol(t, t_m, t_f)
+    ///     .unwrap();
+    /// assert!(bond_vol > 0.0, "a live option has positive bond vol: {bond_vol}");
+    /// //Pushing the bond maturity towards the expiry shrinks the vol towards zero: at expiry the
+    /// //deliverable's price is already settled, so there is nothing left to be uncertain about.
+    /// let near_expiry = hull_white.t_forward_bond_vol(t, 2.9, 3.0).unwrap();
+    /// assert!(near_expiry < bond_vol, "{near_expiry} vs {bond_vol}");
+    /// //The numeraire has to be the later date: a bond maturing after the option is not priced by
+    /// //this measure at all, and asking for it is an error, not a negative volatility.
+    /// assert!(hull_white.t_forward_bond_vol(t, 3.0, 2.0).is_err());
     /// ```
     pub fn t_forward_bond_vol(&self, t: f64, t_m: f64, t_f: f64) -> Result<f64, HullWhiteError> {
         validation::valuation_time(t)?;
@@ -263,21 +290,44 @@ impl<'a> HullWhite<'a> {
         let exp_t = 1.0 - (-self.a * t).exp();
         self.curve().forward(t) + (self.sigma * exp_t).powi(2) / (2.0 * self.a.powi(2))
     }
-    /// Returns volality of bond under the t-forward measure.
+    /// Conditional mean of the short rate: `E[r(t_m) | r(t) = r_t]`.
+    ///
+    /// A Hull-White short rate is Gaussian, so its conditional distribution is fully described by
+    /// this mean and [`HullWhite::variance_r`], and the mean is an exponential pull of the observed
+    /// rate `r_t` towards the model's own mean-reversion target `phi`:
+    ///
+    /// ```text
+    /// E[r(t_m) | r(t) = r_t] = phi(t_m) + (r_t - phi(t)) * exp(-a * (t_m - t))
+    /// ```
+    ///
+    /// `phi` is the deterministic function the rate reverts towards, fixed by requiring the model
+    /// to fit the initial term structure (the same `phi(t)` the crate docs describe, computed by
+    /// the crate-internal `phi_t`).  Nothing about this number is a volatility: the spread around
+    /// this mean is [`HullWhite::variance_r`], and the *bond*-under-forward-measure volatility is
+    /// [`HullWhite::t_forward_bond_vol`].  (This function's doc comment used to read exactly like
+    /// that one's, copied and never changed; if you arrived here looking for a vol, that is the
+    /// other method.)
     ///
     /// # Examples
     ///
     /// ```
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
-    /// let t = 1.0; //time from "now" (0) to start taking the expectation
-    /// let t_m = 2.0; //horizon of the expectation
-    /// let r_t = 0.04; //rate at t
+    /// let t = 1.0; //time from "now" (0) that r_t is observed at
+    /// let t_m = 2.0; //horizon the mean is taken at
+    /// let r_t = 0.04; //observed short rate at t
     /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
     /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
     /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
-    /// let hull_white= hull_white::HullWhite::new(a, sigma, &curve).unwrap();
-    /// let bond_vol = hull_white.mu_r(r_t, t, t_m).unwrap();
+    /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
+    /// let mean_rate = hull_white.mu_r(r_t, t, t_m).unwrap();
+    /// //No time to move: the horizon is the observation date, so the mean is the observed rate.
+    /// assert!((hull_white.mu_r(r_t, t, t).unwrap() - r_t).abs() < 1e-12);
+    /// //Here the long-run level is above r_t, so time pulls the mean up from r_t ...
+    /// assert!(mean_rate > r_t, "{mean_rate} vs {r_t}");
+    /// // ... by less than the full distance, because mean reversion is exponential, not instant.
+    /// let further = hull_white.mu_r(r_t, t, 6.0).unwrap();
+    /// assert!(further > mean_rate, "{further} vs {mean_rate}");
     /// ```
     pub fn mu_r(&self, r_t: f64, t: f64, t_m: f64) -> Result<f64, HullWhiteError> {
         validation::finite("r_t", r_t)?;

@@ -8,6 +8,29 @@ readme = "README.md"
 license = "MIT"
 description = "Pricing functions assuming a Hull White short rate"
 edition = "2024"
+# Minimum supported Rust version.  It is the edition floor, not a claim about the code: nothing here
+# needs a newer compiler than the one `edition = "2024"` requires, and CI builds on `stable` and
+# `nightly` (see .github/workflows/test.yml).  Raise this only when something in the crate actually
+# starts requiring more, and say so in CHANGELOG.md.
+rust-version = "1.85"
+# crates.io taxonomy.  `categories` are the display names from <https://crates.io/categories> (a
+# wrong id is rejected at publish time, not at `cargo build`), and `keywords` are the free-text
+# search terms people actually type — "hull-white" is the name of the model and the main reason a
+# stranger lands on this crate.
+keywords = ["hull-white", "interest-rates", "finance", "options", "pricing"]
+categories = ["finance", "mathematics", "science"]
+# The model documentation under `documentation/` is R Sweave / LaTeX source and its rendered PDF.
+# It is 188 KiB — most of the shipped tarball — and nothing on the Rust side reads it: API docs
+# come from `cargo doc`/docs.rs and the model write-up is read on GitHub.  Keeping it out of the
+# published crate buys that back with no cost to consumers; the README still points at the
+# directory in the repository.
+exclude = [
+  "documentation/*.pdf",
+  "documentation/*.tex",
+  "documentation/*.rnw",
+  "documentation/*.aux",
+  "documentation/*.log",
+]
 
 [features]
 # Heavy Monte-Carlo tests (`src/mc.rs` and the MC checks in `src/rates/tests.rs`).
@@ -43,6 +66,16 @@ rand = "0.9"
 rand_distr = "0.5"
 # A/B harness (`src/solver_ab.rs`) still needs the solver this crate replaced.
 nrfind = "1.0.3"
+
+# Every `pub` item reachable from the crate root has to carry a doc comment, at compile time rather
+# than in review.  `pub(crate)` items are exempt (they are not the API), which is why the kernel
+# functions and the module plumbing stay quiet while `HullWhite`'s methods may not.
+#
+# Declared here rather than as a `#![deny(missing_docs)]` in `src/lib.rs` so the policy covers every
+# target cargo builds through this manifest — lib, doctests, benches — instead of only the one
+# file that happens to carry the attribute.
+[lints.rust]
+missing_docs = "deny"
 
 [profile.bench]
 lto = true
