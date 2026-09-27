@@ -201,7 +201,8 @@ fn get_coupon_times_generates_the_schedule() {
 #[test]
 fn model_primitive_calls() {
     let hw = model();
-    // sigma * sqrt((1 - exp(-2a(t_m - t))) / (2a)) * (1 - exp(-a(t_f - t_m))) > 0
+    // sigma * (1 - exp(-a * (bond_maturity - option_maturity)))
+    //   * sqrt((1 - exp(-2a * (option_maturity - t))) / (2 a^3)) > 0
     let vol = hw.t_forward_bond_vol(1.0, 2.0, 3.0).unwrap();
     assert!(vol > 0.0 && vol.is_finite(), "bond vol {vol}");
     assert!(hw.mu_r(0.05, 1.0, 2.0).unwrap().is_finite());

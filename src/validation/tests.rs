@@ -173,7 +173,16 @@ fn non_finite_input_is_invalid_input_and_is_named() {
         "swap_rate",
     );
     expect_invalid(hull_white.variance_r(nan, 2.0), "t");
-    expect_invalid(hull_white.t_forward_bond_vol(1.0, 2.0, nan), "t_f");
+    //The bond leg is the third parameter and the option leg the second; both names appear in the
+    //error the moment they stop being numbers.
+    expect_invalid(
+        hull_white.t_forward_bond_vol(1.0, 2.0, nan),
+        "bond_maturity",
+    );
+    expect_invalid(
+        hull_white.t_forward_bond_vol(1.0, nan, 3.0),
+        "option_maturity",
+    );
 }
 
 #[test]

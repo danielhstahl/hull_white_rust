@@ -109,3 +109,79 @@ fn short_rate_now_rejects_a_curve_that_is_not_finite_at_zero() {
     //...and still prices a `t > 0` instrument, where the front is not needed either.
     assert!(hull_white.phi_t(0.25).is_finite());
 }
+
+/// The identity `t_forward_bond_vol`'s doc block claims, checked rather than asserted: the
+/// number it returns is the *total* log-variance of the deliverable bond under the
+/// option-expiry forward measure, i.e. the integral of that bond's instantaneous
+/// forward-measure volatility `sigma * (B(s, T_b) - B(s, T))` from `s = t` to `s = T`.
+///
+/// Integrated here against [`HullWhite::bond_b`] rather than against another closed form, on
+/// purpose.  The parameter names say which of the two dates is the expiry and which is the
+/// deliverable; this says it again in numbers.  Swap `option_maturity` and `bond_maturity` in
+/// the pricer, or read the doc backwards as it used to be written, and the two stop agreeing:
+/// neither `B(s, .)` nor the integral's upper limit is symmetric in them.
+#[test]
+fn t_forward_bond_vol_is_the_integrated_forward_measure_variance() {
+    let curve = STEEP_CURVE.curve();
+    let sigma = STEEP_CURVE.sigma;
+    let hull_white = HullWhite::new(STEEP_CURVE.a, sigma, &curve).unwrap();
+    for &(t, option_maturity, bond_maturity) in &[
+        (0.0, 1.0, 2.0),
+        (0.25, 0.75, 10.0),
+        (0.5, 2.0, 5.0),
+        (1.0, 3.0, 3.25),
+    ] {
+        //Simpson's rule over the option's life; `steps` is even.
+        let steps = 4000usize;
+        let h = (option_maturity - t) / steps as f64;
+        let squared_vol = |s: f64| {
+            let instantaneous = sigma
+                * (hull_white.bond_b(s, bond_maturity) - hull_white.bond_b(s, option_maturity));
+            instantaneous * instantaneous
+        };
+        let mut sum = squared_vol(t) + squared_vol(option_maturity);
+        for i in 1..steps {
+            let s = t + i as f64 * h;
+            let weight = if i % 2 == 1 { 4.0 } else { 2.0 };
+            sum += weight * squared_vol(s);
+        }
+        let integrated_variance = sum * h / 3.0;
+        let vol = hull_white
+            .t_forward_bond_vol(t, option_maturity, bond_maturity)
+            .unwrap();
+        assert_relative_eq!(
+            vol * vol,
+            integrated_variance,
+            max_relative = 1e-8,
+            epsilon = 1e-18
+        );
+    }
+}
+
+/// The two affine coefficients are the price itself, not decoration beside it: reassembling
+/// `exp(C - B * r)` from them reproduces [`HullWhite::bond_price_t`] bit for bit (it is the
+/// same expression, which is what makes naming the two halves worth doing), and `B` is that
+/// price's own duration `-dP/dr / P`, measured here by finite difference instead of taken on
+/// trust from the algebra.
+#[test]
+fn the_affine_coefficients_rebuild_the_bond_price_and_its_duration() {
+    let curve = STEEP_CURVE.curve();
+    let hull_white = HullWhite::new(STEEP_CURVE.a, STEEP_CURVE.sigma, &curve).unwrap();
+    let r = 0.037;
+    for &(t, maturity) in &[(0.0, 1.0), (0.5, 2.0), (1.0, 5.0), (2.0, 2.0)] {
+        let b = hull_white.bond_b(t, maturity);
+        let c = hull_white.bond_c(t, maturity);
+        let rebuilt = (c - b * r).exp();
+        let price = hull_white.bond_price_t(r, t, maturity).unwrap();
+        assert_abs_diff_eq!(rebuilt, price, epsilon = 0.0);
+        let h = 1e-6;
+        let d_price = (hull_white.bond_price_t(r + h, t, maturity).unwrap()
+            - hull_white.bond_price_t(r - h, t, maturity).unwrap())
+            / (2.0 * h);
+        assert_abs_diff_eq!(-d_price / price, b, epsilon = 1e-8);
+    }
+    //On its own maturity date the bond is worth par and does not care what the rate is:
+    //B(t, t) = 0 and C(t, t) = 0, exactly, not approximately.
+    assert_abs_diff_eq!(hull_white.bond_b(2.0, 2.0), 0.0, epsilon = 0.0);
+    assert_abs_diff_eq!(hull_white.bond_c(2.0, 2.0), 0.0, epsilon = 0.0);
+}

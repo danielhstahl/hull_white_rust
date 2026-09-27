@@ -121,11 +121,25 @@ impl<'a> HullWhite<'a> {
         is_american: bool,
         payoff: &dyn Fn(f64, f64, f64, usize) -> f64,
     ) -> f64 {
-        let alpha_div_sigma = |_t_step: f64, curr_val: f64, _dt: f64, _width: usize| {
-            -(self.a * curr_val) / self.sigma
-        };
-        let sigma_prime = |_t_step: f64, _curr_val: f64, _dt: f64, _j: usize| 0.0;
-        let sigma_inv = |_t_step: f64, y: f64, _dt: f64, _j: usize| self.sigma * y;
+        //The three callbacks that describe the diffusion, in this model's terms.  Note that the
+        //second argument is not the same kind of number in each of them: `binomial_tree` takes a
+        //diffusion `dX = alpha dt + sigma dW` and builds its lattice on a pure-Brownian
+        //coordinate `w`, recovering the state from `w` through the `sigma_inverse` callback.
+        //The state diffused here is not the short rate but the *shifted* rate `y = r - phi(t)`,
+        //which obeys `dy = -a y dt + sigma dW` -- drift `-a y`, a constant volatility.  So:
+        //
+        //  * `alpha_div_sigma` and `d_sigma_d_state` are handed the state `y`;
+        //  * `state_from_lattice_coord` -- the engine's `sigma_inverse` -- is handed the
+        //    lattice coordinate `w` and *returns* the state: the primitive of `1 / sigma` is
+        //    `y -> y / sigma`, so its inverse is `w -> sigma * w`.  It used to be named
+        //    `sigma_inv` with its argument named `y`, which read as though the engine handed
+        //    over a rate that then got multiplied by sigma, instead of being the `w -> y` map.
+        //    And `sigma_prime` is `d sigma / d(state)`: identically zero here, because a
+        //    constant volatility does not vary with the state.
+        let alpha_div_sigma =
+            |_t_step: f64, y: f64, _dt: f64, _width: usize| -(self.a * y) / self.sigma;
+        let d_sigma_d_state = |_t_step: f64, _state: f64, _dt: f64, _j: usize| 0.0;
+        let state_from_lattice_coord = |_t_step: f64, w: f64, _dt: f64, _j: usize| self.sigma * w;
         let mut phi_cache: Vec<f64> = binomial_tree::get_all_t(horizon, num_steps)
             .map(|tau| self.phi_t(t + tau))
             .collect();
@@ -140,11 +154,13 @@ impl<'a> HullWhite<'a> {
         };
         binomial_tree::compute_price_raw(
             &alpha_div_sigma,
-            &sigma_prime,
-            &sigma_inv,
+            &d_sigma_d_state,
+            &state_from_lattice_coord,
             &node_payoff,
             &discount,
-            (r_t - self.phi_t(t)) / self.sigma, //initial "y"
+            //The starting lattice coordinate `w`: the value that `state_from_lattice_coord`
+            //sends to the initial state `y = r_t - phi(t)`.
+            (r_t - self.phi_t(t)) / self.sigma,
             horizon,
             num_steps,
             is_american,

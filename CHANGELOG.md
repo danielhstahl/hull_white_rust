@@ -16,6 +16,57 @@ number this crate returns is the number it was in 0.9.0, and the tree results ar
 pinned bit-for-bit (`trees::tests::swaption_tree_at_t_is_bit_identical_to_pre_fix`), so
 the extra surface is not carrying a numeric change in disguise.
 
+### Changed — identifiers that said the opposite of what they meant
+
+Naming and plumbing; no price moves (checked by diffing a grid of ~1,850 prices across all
+seven scenarios against the pre-change build — every number identical, the only differences
+being the two error messages named below).
+
+* `HullWhite::t_forward_bond_vol(t, t_m, t_f)` now takes `option_maturity` and
+  `bond_maturity`. The old names were not merely vague: the doc described them as "the bond
+  that matures at `t_m` is the asset, the option expires at `t_f`", which is the reverse of
+  what the formula and every call site in the crate mean — `t_m` *was* the option maturity,
+  `t_f` the bond maturity, and the function's own `t_f > t_m` check contradicts the sentence
+  above it.  The doc now carries the Hull-White expression with each symbol defined (`T` =
+  `option_maturity`, `T_b` = `bond_maturity`), and
+  `model::tests::t_forward_bond_vol_is_the_integrated_forward_measure_variance` pins it by
+  integrating the deliverable's forward-measure volatility
+  `sigma * (B(s, T_b) - B(s, T))` over the option's life: the two dates are interchangeable
+  in neither, so the roles are now checked in numbers rather than in prose.
+* Invalid-input messages follow the rename — `t_forward_bond_vol(1.0, 2.0, nan)` now reports
+  `bond_maturity = NaN is not finite` where it reported `t_f`, and the option leg reports
+  `option_maturity`.  Callers matching on those strings are the only thing this can break.
+* The affine bond maths is two crate-internal methods, `HullWhite::bond_b` (`B(t, T)`) and
+  `HullWhite::bond_c` (`C(t, T)`), replacing three free functions that threaded the model's
+  parameters by hand: `a_t(a, t_diff)`, `ct_t(a, sigma, t, t_m, curve)` and `at_t(a, t,
+  t_m)` — the last a pure alias of the first with `t_diff = t_m - t` written into its own
+  argument list.  Two names now, each documenting which half of `P(t, T) = exp(C - B * r)` it
+  is, and `model::tests::the_affine_coefficients_rebuild_the_bond_price_and_its_duration`
+  shows the reassembly is bit-identical to `bond_price_t` and that `B` really is that price's
+  duration (`-dP/dr / P`, measured by finite difference).
+* `gamma_edf` is a model method — `self.gamma_edf(t, option_maturity, delta)` — with its
+  formula and its source links attached, and lives in `rates` with the instrument that uses
+  it.  `edf_compute` and `compute_libor_rate` moved there too, and deliberately **stay** free
+  functions: they read no model state at all (`a`, `sigma` and the curve are all spent
+  upstream, into the bond prices and into `gamma`), so binding `&self` would advertise a
+  dependency that is not in the arithmetic.
+* The tree's diffusion callbacks are named for what they map.  What was `sigma_inv`, a closure
+  whose argument is the lattice's pure-Brownian coordinate `w` and which *returns* the
+  shifted state (`w -> sigma * w`), is `state_from_lattice_coord`; what was `sigma_prime`,
+  i.e. `d sigma / d(state)`, is `d_sigma_d_state` (identically zero, a constant
+  volatility).  The old names had the inverse-volatility callback's argument written as `y`,
+  reading as though the engine handed over a rate that was then multiplied by sigma, when it
+  is the `w -> y` map itself.
+* `Sync` is spelled `Sync` in `HullWhite::init`'s closure bounds rather than
+  `std::marker::Sync`.
+* Crate docs: the "Key Concepts" `(0, t, T, TM)` block — itself the shape of the ambiguity
+  above, since `T` and `TM` never say which maturity is whose — is replaced by the list of
+  role-named time parameters (`t`, `option_maturity`, `bond_maturity`, `delta`) and the rule
+  that textbook symbols appear only inside formulas, spelled against the name they stand for.
+  The crate-layout table is updated for the moved items.
+* `options.rs`: four `//volatility with maturity` end-of-line comments — which described
+  neither the volatility nor the maturity — now say the volatility of the deliverable bond.
+
 ### Added — the European swaption tree, public, so it can be cross-checked
 
 * `HullWhite::european_payer_swaption_tree`, `HullWhite::european_receiver_swaption_tree`,

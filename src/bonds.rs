@@ -10,7 +10,6 @@
 //! leg — which is also what lets the Jamshidian closures stay non-`Result`.
 
 use crate::HullWhite;
-use crate::curves::{at_t, ct_t};
 use crate::error::HullWhiteError;
 use crate::validation;
 
@@ -87,14 +86,12 @@ impl<'a> HullWhite<'a> {
     /// fed arguments already checked at the public boundary, so they use this instead of paying for
     /// (and having to propagate) the checks again.
     pub(crate) fn bond_price_t_raw(&self, r_t: f64, t: f64, bond_maturity: f64) -> f64 {
-        (-r_t * at_t(self.a, t, bond_maturity)
-            + ct_t(self.a, self.sigma, t, bond_maturity, self.curve()))
-        .exp()
+        (-r_t * self.bond_b(t, bond_maturity) + self.bond_c(t, bond_maturity)).exp()
     }
-    //used for newton's method
+    /// `dP(t, T)/dr_t = -P(t, T) * B(t, T)`, the Newton step for the critical-rate solve.
     pub(crate) fn bond_price_t_deriv(&self, r_t: f64, t: f64, bond_maturity: f64) -> f64 {
-        let at_t_c = at_t(self.a, t, bond_maturity);
-        -(-r_t * at_t_c + ct_t(self.a, self.sigma, t, bond_maturity, self.curve())).exp() * at_t_c
+        let b = self.bond_b(t, bond_maturity);
+        -self.bond_price_t_raw(r_t, t, bond_maturity) * b
     }
     /// Returns price of a zero coupon bond at current date
     ///

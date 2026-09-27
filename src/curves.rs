@@ -56,9 +56,10 @@
 //! assert!((model.curve().forward(3.0) - 0.05).abs() < 1e-9);
 //! ```
 
+use crate::HullWhite;
 use crate::error::HullWhiteError;
 
-/// The initial term structure a [`HullWhite`](crate::HullWhite) model is calibrated to.
+/// The initial term structure a [`HullWhite`] model is calibrated to.
 ///
 /// Two accessors matter to the model, both at a time `t` measured from "now":
 ///
@@ -394,46 +395,51 @@ pub(crate) fn derivative(f: &dyn Fn(f64) -> f64, t: f64) -> f64 {
     }
 }
 
-//tdiff=T-t
-pub(crate) fn a_t(a: f64, t_diff: f64) -> f64 {
-    (1.0 - (-a * t_diff).exp()) / a
-}
-
-//t is first future time
-//t_m is second future time
-pub(crate) fn at_t(a: f64, t: f64, t_m: f64) -> f64 {
-    a_t(a, t_m - t)
-}
-
-/// The affine constant `C(t, t_m)` of the zero-coupon price
-/// `P(t, t_m) = exp(C(t, t_m) - B(t, t_m) * r_t)`, fitted to the initial curve.
+/// The two affine coefficients of the Hull-White zero-coupon bond price,
+/// `P(t, T) = exp(C(t, T) - B(t, T) * r_t)`.
 ///
-/// Takes the curve as one object because both halves of it are needed here and they are only
-/// meaningful together: `y(t) - y(t_m)` moves along the cumulative yield and `f(t)` is the
-/// slope that yield is built from.  A model whose `forward` is not the derivative of its
-/// `zero_yield` makes this the difference of two unrelated curves — which is exactly why
-/// [`validate_curve`] runs before anything calls this.
-pub(crate) fn ct_t(a: f64, sigma: f64, t: f64, t_m: f64, curve: &dyn YieldCurve) -> f64 {
-    let sqr = (-a * t_m).exp() - (-a * t).exp();
-    curve.zero_yield(t) - curve.zero_yield(t_m) + curve.forward(t) * at_t(a, t, t_m)
-        - (sigma * sqr).powi(2) * ((2.0 * a * t).exp() - 1.0) / (4.0 * a.powi(3))
-}
+/// Methods rather than free functions, so that `a`, `sigma` and the calibrated curve arrive with
+/// `self` instead of being threaded by hand through every call.  The previous spelling was three
+/// free functions doing exactly that — `a_t(a, t_diff)`, `ct_t(a, sigma, t, t_m, curve)` and
+/// `at_t(a, t, t_m)`, the last a pure alias of the first with `t_diff = t_m - t` written into
+/// its own argument list, so the only difference between the two was who got to decide where
+/// the subtraction happened.  Two methods now, each carrying the formula it evaluates.
+impl HullWhite<'_> {
+    /// `B(t, T) = (1 - exp(-a (T - t))) / a`: the coefficient `r_t` is multiplied by in the
+    /// bond-price exponent, which makes it the bond's own duration, since
+    /// `-dP(t, T)/dr_t / P(t, T) = B(t, T)`.
+    ///
+    /// Depends on `t` and `T` only through the tenor `T - t` — the model is time-homogeneous
+    /// once the curve has fixed `phi` — which is why one function of the gap replaces the
+    /// `a_t` / `at_t` pair.
+    pub(crate) fn bond_b(&self, t: f64, maturity: f64) -> f64 {
+        (1.0 - (-self.a * (maturity - t)).exp()) / self.a
+    }
 
-//https://www.math.nyu.edu/~alberts/spring07/Lecture5.pdf
-//https://developers.opengamma.com/quantitative-research/Hull-White-One-Factor-Model-OpenGamma.pdf (note that in the open gamma derivation, t0=option_maturity)
-pub(crate) fn gamma_edf(a: f64, sigma: f64, t: f64, option_maturity: f64, delta: f64) -> f64 {
-    let exp_t = (-a * (option_maturity - t)).exp();
-    let exp_d = (-a * delta).exp();
-    (sigma.powi(2) / a.powi(3))
-        * (1.0 - exp_d)
-        * ((1.0 - exp_t) - exp_d * 0.5 * (1.0 - exp_t.powi(2)))
-}
-pub(crate) fn edf_compute(bond_num: f64, bond_den: f64, gamma: f64, delta: f64) -> f64 {
-    ((bond_num / bond_den) * gamma.exp() - 1.0) / delta
-}
-
-pub(crate) fn compute_libor_rate(nearest_bond: f64, farthest_bond: f64, tenor: f64) -> f64 {
-    (nearest_bond - farthest_bond) / (farthest_bond * tenor)
+    /// `C(t, T)`, the affine constant of the zero-coupon price
+    /// `P(t, T) = exp(C(t, T) - B(t, T) * r_t)`, fitted to the initial curve:
+    ///
+    /// ```text
+    /// C(t, T) = y(t) - y(T) + f(0, t) * B(t, T)
+    ///           - sigma^2 * (exp(-a T) - exp(-a t))^2 * (exp(2 a t) - 1) / (4 a^3)
+    /// ```
+    ///
+    /// with `y` the cumulative yield and `f(0, t) = y'(t)` the instantaneous forward
+    /// ([`YieldCurve::zero_yield`] / [`YieldCurve::forward`]) of the curve this model was
+    /// calibrated to.
+    ///
+    /// Both halves of the curve are needed here and they are only meaningful together: `y(t) -
+    /// y(T)` moves along the cumulative yield and `f(0, t)` is the slope that yield is built
+    /// from.  A model whose `forward` is not the derivative of its own `zero_yield` makes this
+    /// the difference of two unrelated curves — which is exactly why [`validate_curve`] runs
+    /// before anything calls this.
+    pub(crate) fn bond_c(&self, t: f64, maturity: f64) -> f64 {
+        let curve = self.curve();
+        let sqr = (-self.a * maturity).exp() - (-self.a * t).exp();
+        curve.zero_yield(t) - curve.zero_yield(maturity)
+            + curve.forward(t) * self.bond_b(t, maturity)
+            - (self.sigma * sqr).powi(2) * ((2.0 * self.a * t).exp() - 1.0) / (4.0 * self.a.powi(3))
+    }
 }
 
 /// What a [`HullWhite`](crate::HullWhite) holds onto: the curve, borrowed or built.

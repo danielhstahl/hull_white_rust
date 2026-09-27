@@ -59,7 +59,6 @@
 
 use crate::HullWhite;
 use crate::bonds::coupon_bond_generic_t;
-use crate::curves::{at_t, ct_t};
 use crate::error::HullWhiteError;
 use crate::rootfinder::{self, Solution};
 use crate::validation;
@@ -163,16 +162,16 @@ impl<'a> HullWhite<'a> {
             if index != last_index {
                 total_weight += coupon_rate;
             }
-            let b = at_t(self.a, u, *coupon_time);
-            let c = ct_t(self.a, self.sigma, u, *coupon_time, self.curve());
+            let b = self.bond_b(u, *coupon_time);
+            let c = self.bond_c(u, *coupon_time);
             c_max = c_max.max(c);
             b_min = b_min.min(b);
             b_max = b_max.max(b);
         }
         let w_last = 1.0 + coupon_rate;
         let last_time = coupon_times[last_index];
-        let b_last = at_t(self.a, u, last_time);
-        let c_last = ct_t(self.a, self.sigma, u, last_time, self.curve());
+        let b_last = self.bond_b(u, last_time);
+        let c_last = self.bond_c(u, last_time);
         //Both bounds need non-negative weights.  A coupon_rate at or below -100% breaks them, so
         //hand that nonsense to the widening path instead of trusting a bracket built on sand.
         if !(b_min > 0.0 && b_max > 0.0 && total_weight > 0.0 && w_last > 0.0) {

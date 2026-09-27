@@ -152,8 +152,8 @@ impl<'a> HullWhite<'a> {
         forward_curve: &'a G,
     ) -> Result<Self, HullWhiteError>
     where
-        F: Fn(f64) -> f64 + std::marker::Sync,
-        G: Fn(f64) -> f64 + std::marker::Sync,
+        F: Fn(f64) -> f64 + Sync,
+        G: Fn(f64) -> f64 + Sync,
     {
         Self::validate_parameters(a, sigma)?;
         //`&F` is itself `Fn + Sync` when `F` is, so the wrapper borrows the caller's closures
@@ -232,22 +232,49 @@ impl<'a> HullWhite<'a> {
         }
         Ok(())
     }
-    /// Volatility of the `t_m`-maturity bond price under the `t_f`-forward measure.
+    /// Black volatility of a bond option's deliverable, under the option-expiry measure.
     ///
-    /// This is the Black volatility of the underlying of a bond option: valued at `t`, the bond that
-    /// matures at `t_m` is the asset, the option expires at `t_f`, and pricing that option under the
-    /// `t_f`-maturity numeraire makes the bond price a lognormal martingale whose sigma is the
-    /// number returned here.  It is what feeds the Black / Jamshidian leg strike, not a moment of
-    /// the short rate — for those see [`HullWhite::mu_r`] (mean) and [`HullWhite::variance_r`]
-    /// (variance).
+    /// This is a bond option's volatility, not a moment of the short rate.  Valued at `t`, the
+    /// option is exercised at `option_maturity` and the bond it delivers matures at
+    /// `bond_maturity`; taking `P(t, option_maturity)` as the numeraire makes the deliverable
+    /// `P(t, bond_maturity)` a lognormal martingale, and what comes back here is the *total*
+    /// (not instantaneous) log-volatility of that deliverable over the option's remaining life:
     ///
-    /// The two time gaps do different things to it: `t_m - t` sets how volatile the bond price is
-    /// while the option is alive, and `t_f - t_m` scales that down as the option expiry approaches
-    /// the bond's own maturity — a bond that matures on (or before) the expiry date has a known
-    /// price at expiry, so its forward-measure volatility goes to zero there.  Hence both
-    /// `t_m > t` and `t_f > t_m` are required: outside them the expression is not a volatility at
-    /// all, and it is refused rather than returned as a negative or zero number that Black will
-    /// still happily swallow.
+    /// ```text
+    /// sigma_P(t) = sqrt( Var^T[ ln P(T, T_b) / P(t, T_b) ] )
+    ///            = sigma * (1 - exp(-a * (T_b - T)))
+    ///                    * sqrt( (1 - exp(-2 * a * (T - t))) / (2 * a^3) )
+    /// ```
+    ///
+    /// symbol by symbol:
+    ///
+    /// * `t` — the valuation date, measured from "now" (0);
+    /// * `T` — `option_maturity`: the expiry, the maturity of the numeraire `P(., T)`, and the
+    ///   upper limit of the variance integral;
+    /// * `T_b` — `bond_maturity`: the maturity of the deliverable, which has to be the later of
+    ///   the two dates;
+    /// * `a`, `sigma` — this model's mean-reversion speed and volatility;
+    /// * `Var^T[.]` — variance under the `T`-forward measure, got by integrating the
+    ///   deliverable's volatility under that measure, `sigma * (B(s, T_b) - B(s, T))` with
+    ///   `B` the crate-internal `HullWhite::bond_b`, from `s = t` to `s = T`.
+    ///
+    /// It is what feeds the Black / Jamshidian leg strike; for the short rate's own moments see
+    /// [`HullWhite::mu_r`] (mean) and [`HullWhite::variance_r`] (variance).
+    ///
+    /// The two time gaps do different things.  `T - t` is the option's remaining life, and it
+    /// is what makes this a *total* volatility: with no time to expiry nothing is accumulated,
+    /// and the Black term downstream of it is a division by zero.  `T_b - T` is the tenor the
+    /// deliverable still has when it is delivered, and it scales the whole thing down — a bond
+    /// that matures on the expiry date has a settled price at expiry, so there is nothing left
+    /// for its forward-measure volatility to describe.  Hence both `option_maturity > t` and
+    /// `bond_maturity > option_maturity` are required: outside them the expression is not a
+    /// volatility at all, and it is refused rather than returned as the zero-or-negative number
+    /// Black will still happily swallow.
+    ///
+    /// The last two parameters used to be `t_m` and `t_f`, described as "the bond's maturity" and
+    /// "the option expiry" — the exact reverse of what the formula, the validation and every
+    /// call site in the crate have always meant by them: `t_m` was the option maturity, `t_f`
+    /// the bond maturity.  They are named for those roles now.
     ///
     /// # Examples
     ///
@@ -255,32 +282,46 @@ impl<'a> HullWhite<'a> {
     /// let a = 0.2; //speed of mean reversion for underlying Hull White process
     /// let sigma = 0.3; //volatility of underlying Hull White process
     /// let t = 1.0; //valuation date, measured from "now" (0)
-    /// let t_m = 2.0; //maturity of the bond that is the option's underlying
-    /// let t_f = 3.0; //option expiry == the numeraire's maturity
+    /// let option_maturity = 2.0; //expiry of the option, and of the numeraire P(., T)
+    /// let bond_maturity = 3.0; //maturity of the bond delivered on exercise
     /// // One curve object: the cumulative yield y(t) = 0.05 t + 0.01 t^2, whose
     /// // derivative f(0,t) = 0.05 + 0.02 t is the instantaneous forward.
     /// let curve = hull_white::from_yield(|t: f64| 0.05 * t + 0.01 * t * t);
     /// let hull_white = hull_white::HullWhite::new(a, sigma, &curve).unwrap();
     /// let bond_vol = hull_white
-    ///     .t_forward_bond_vol(t, t_m, t_f)
+    ///     .t_forward_bond_vol(t, option_maturity, bond_maturity)
     ///     .unwrap();
     /// assert!(bond_vol > 0.0, "a live option has positive bond vol: {bond_vol}");
-    /// //Pushing the bond maturity towards the expiry shrinks the vol towards zero: at expiry the
-    /// //deliverable's price is already settled, so there is nothing left to be uncertain about.
-    /// let near_expiry = hull_white.t_forward_bond_vol(t, 2.9, 3.0).unwrap();
-    /// assert!(near_expiry < bond_vol, "{near_expiry} vs {bond_vol}");
-    /// //The numeraire has to be the later date: a bond maturing after the option is not priced by
-    /// //this measure at all, and asking for it is an error, not a negative volatility.
+    /// //Pulling the deliverable's maturity in towards the expiry shrinks the vol: a bond with
+    /// //a tenth of a year left at delivery is far less uncertain than a full year.
+    /// let short_deliverable = hull_white.t_forward_bond_vol(t, 2.0, 2.1).unwrap();
+    /// assert!(short_deliverable < bond_vol, "{short_deliverable} vs {bond_vol}");
+    /// //Shortening the option's own life shrinks it the other way: less time, less variance.
+    /// let short_option = hull_white.t_forward_bond_vol(t, 1.1, 3.0).unwrap();
+    /// assert!(short_option < bond_vol, "{short_option} vs {bond_vol}");
+    /// //The deliverable has to outlive the option: a bond already repaid by the expiry date is
+    /// //not an underlying at all, and asking for one is an error, not a negative volatility.
     /// assert!(hull_white.t_forward_bond_vol(t, 3.0, 2.0).is_err());
     /// ```
-    pub fn t_forward_bond_vol(&self, t: f64, t_m: f64, t_f: f64) -> Result<f64, HullWhiteError> {
+    pub fn t_forward_bond_vol(
+        &self,
+        t: f64,
+        option_maturity: f64,
+        bond_maturity: f64,
+    ) -> Result<f64, HullWhiteError> {
         validation::valuation_time(t)?;
-        //t_m == t collapses the variance term to zero (and the Black term to a division by zero),
-        //and t_f <= t_m flips the sign of the vol, so neither is a volatility at all.
-        validation::strictly_after("t_m", t_m, "t", t)?;
-        validation::strictly_after("t_f", t_f, "t_m", t_m)?;
-        let exp_d = 1.0 - (-self.a * (t_f - t_m)).exp();
-        let exp_t = 1.0 - (-2.0 * self.a * (t_m - t)).exp();
+        //option_maturity == t collapses the variance term to zero (and the Black term to a
+        //division by zero), and bond_maturity <= option_maturity flips the sign of the vol, so
+        //neither is a volatility at all.
+        validation::strictly_after("option_maturity", option_maturity, "t", t)?;
+        validation::strictly_after(
+            "bond_maturity",
+            bond_maturity,
+            "option_maturity",
+            option_maturity,
+        )?;
+        let exp_d = 1.0 - (-self.a * (bond_maturity - option_maturity)).exp();
+        let exp_t = 1.0 - (-2.0 * self.a * (option_maturity - t)).exp();
         validation::finish(
             "t_forward_bond_vol",
             self.sigma * (exp_t / (2.0 * self.a.powi(3))).sqrt() * exp_d,

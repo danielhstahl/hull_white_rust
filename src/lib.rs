@@ -15,12 +15,23 @@
 //!
 //! ## Key Concepts
 //!
-//! The fundamental time points in this library are (0, t, T, TM), where:
-//! - 0 is the current time (reflective of the current yield curve)
-//! - t is some future time for pricing options given the underlying at that time
-//! - T and TM represent various asset times (option maturity, bond maturity, etc.)
+//! All times are measured with respect to time 0 ("now"), and every time parameter is named for
+//! the role it plays rather than for a letter of the model notation:
 //!
-//! All times are measured with respect to time 0.
+//! - `t` — the valuation date, the time the state `r_t` is observed at; the `*_now` variants
+//!   are the `t = 0` case of the same instrument, with the state read off the calibration
+//!   instead of passed in
+//! - `option_maturity` — when an option is exercised, and the maturity of the numeraire its
+//!   price is written under
+//! - `bond_maturity` — when the bond an option delivers is repaid; always later than the
+//!   option's own maturity, or there is nothing left to deliver
+//! - `delta` — the tenor of a simple (Libor) rate, the length of one payment period
+//!
+//! Textbook symbols (`T`, `T_b`, `t0`) show up only inside formulas, where the doc comment
+//! spells each one against the parameter name it stands for.  The older `(0, t, T, TM)`
+//! shorthand is deliberately not used in signatures: `T` and `TM` never said which maturity was
+//! the option's and which was the deliverable's, which is exactly how `t_forward_bond_vol` came
+//! to carry documentation the reverse of its own formula.
 //!
 //! ## Example Usage
 //!
@@ -156,12 +167,12 @@
 //! | Module | What lives there |
 //! |---|---|
 //! | `model` | the [`HullWhite`] struct, calibration entry, `phi_t` / `mu_r` / `variance_r` / [`short_rate_now`](HullWhite::short_rate_now) / `t_forward_bond_vol` |
-//! | [`curves`] | the [`YieldCurve`] trait and its builders, the construction-time consistency check, plus `a_t` (bond duration), `ct_t` (bond price constant) and the Eurodollar variance integral |
+//! | [`curves`] | the [`YieldCurve`] trait and its builders, the construction-time consistency check, and the [`HullWhite`] affine bond coefficients `bond_b` (the duration) and `bond_c` (the price constant) |
 //! | `schedules` | coupon/payment schedules and the remaining-payment count |
 //! | `bonds` | zero coupon and coupon bond prices, and the coupon-sum kernels they share |
 //! | `jamshidian` | the critical-rate bracket and solve, and the decomposition that consumes them |
 //! | `options` | bond options and coupon-bond option entry points |
-//! | `rates` | caplets, whole caps and floors over a period schedule, Eurodollar futures, forward and spot Libor |
+//! | `rates` | caplets, whole caps and floors over a period schedule, Eurodollar futures (with the convexity `gamma_edf`), forward and spot Libor |
 //! | `swaps` | forward swap rate, swap price, European swaptions |
 //! | `trees` | the short-rate tree: the shared lattice engine (`tree_price`), the European tree cross-check (`european_*_swaption_tree`) and the American swaptions |
 //! | [`error`] | [`error::HullWhiteError`] |

@@ -6,7 +6,7 @@
 //! what [`crate::validation::caplet_strike`] guards.  The floorlet is the same map with the bond
 //! *call* in place of the bond put, so a cap and a floor on identical periods differ by exactly
 //! the forward-rate leg they are written on, not by anything numerical.  The futures price differs
-//! from the forward rate by the convexity term built from [`crate::curves::gamma_edf`].
+//! from the forward rate by the convexity term built from [`HullWhite::gamma_edf`].
 //!
 //! A cap (or floor) is a *schedule* of caplets (floorlets), each with its own expiry and strike.
 //! [`HullWhite::cap_now`] / [`HullWhite::cap_t`] and [`HullWhite::floor_now`] /
@@ -14,9 +14,30 @@
 //! one call rather than leaving the caller to loop.
 
 use crate::HullWhite;
-use crate::curves::{compute_libor_rate, edf_compute, gamma_edf};
 use crate::error::HullWhiteError;
 use crate::validation;
+
+/// The simple (non-compounding, non-convexity-adjusted) rate over `tenor` implied by two zero
+/// coupon bond prices: `(P_near - P_far) / (P_far * tenor)`.
+///
+/// Stays a free function rather than a method because it reads no model state at all — no `a`,
+/// no `sigma`, no curve — just the two bond prices the caller already has.  A `&self` here would
+/// advertise a dependency that is not in the arithmetic.  It used to sit in
+/// [`crate::curves`] with the curve maths that does need a curve.
+fn compute_libor_rate(nearest_bond: f64, farthest_bond: f64, tenor: f64) -> f64 {
+    (nearest_bond - farthest_bond) / (farthest_bond * tenor)
+}
+
+/// The Eurodollar futures rate out of the two bracketing bond prices and the convexity gamma:
+/// `(P_near / P_far * exp(gamma) - 1) / delta`.
+///
+/// Same reason [`compute_libor_rate`] stays free: the model's `a`, `sigma` and curve are all
+/// already spent, into `bond_num`/`bond_den` and into `gamma`, by the time this runs.  The
+/// difference from a plain forward Libor is the `exp(gamma)` — the daily-marked-to-market
+/// settlement of the future, which [`HullWhite::gamma_edf`] prices.
+fn edf_compute(bond_num: f64, bond_den: f64, gamma: f64, delta: f64) -> f64 {
+    ((bond_num / bond_den) * gamma.exp() - 1.0) / delta
+}
 
 impl<'a> HullWhite<'a> {
     /// Returns price of a caplet at current time
@@ -372,6 +393,31 @@ impl<'a> HullWhite<'a> {
             .sum::<Result<f64, HullWhiteError>>()?;
         validation::finish("floor_t", price)
     }
+    /// The Eurodollar convexity adjustment: the log-normal convexity of the fixing that makes a
+    /// future worth more than the forward rate it is written on.
+    ///
+    /// A forward rate is paid at the *end* of its period and is discounted at the rate being
+    /// fixed; a future is marked to market daily against that same fixing, so the margin is
+    /// funded at the rate it is being marked by.  The futures rate is the forward rate times
+    /// `exp(gamma)` — the `exp()` is applied by [`edf_compute`], not here.
+    ///
+    /// ```text
+    /// gamma = (sigma^2 / a^3) * (1 - exp(-a * delta))
+    ///         * [ (1 - exp(-a (option_maturity - t)))
+    ///             - exp(-a * delta) * 0.5 * (1 - exp(-2a (option_maturity - t))) ]
+    /// ```
+    ///
+    /// Derivations: <https://www.math.nyu.edu/~alberts/spring07/Lecture5.pdf> and the
+    /// OpenGamma note
+    /// <https://developers.opengamma.com/quantitative-research/Hull-White-One-Factor-Model-OpenGamma.pdf>,
+    /// in whose notation the `t0` of the adjustment is this function's `option_maturity`.
+    pub(crate) fn gamma_edf(&self, t: f64, option_maturity: f64, delta: f64) -> f64 {
+        let exp_t = (-self.a * (option_maturity - t)).exp();
+        let exp_d = (-self.a * delta).exp();
+        (self.sigma.powi(2) / self.a.powi(3))
+            * (1.0 - exp_d)
+            * ((1.0 - exp_t) - exp_d * 0.5 * (1.0 - exp_t.powi(2)))
+    }
     /// Returns price of a Euro Dollar Future at some future time
     ///
     /// # Examples
@@ -400,7 +446,7 @@ impl<'a> HullWhite<'a> {
         validation::valuation_time(t)?;
         validation::strictly_after("option_maturity", option_maturity, "t", t)?;
         validation::positive("delta", delta)?;
-        let gamma = gamma_edf(self.a, self.sigma, t, option_maturity, delta);
+        let gamma = self.gamma_edf(t, option_maturity, delta);
         validation::finish(
             "euro_dollar_future_t",
             edf_compute(
@@ -455,7 +501,7 @@ impl<'a> HullWhite<'a> {
     ) -> Result<f64, HullWhiteError> {
         validation::strictly_after("option_maturity", option_maturity, "t", 0.0)?;
         validation::positive("delta", delta)?;
-        let gamma = gamma_edf(self.a, self.sigma, 0.0, option_maturity, delta);
+        let gamma = self.gamma_edf(0.0, option_maturity, delta);
         validation::finish(
             "euro_dollar_future_now",
             edf_compute(

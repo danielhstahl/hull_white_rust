@@ -54,7 +54,7 @@ impl<'a> HullWhite<'a> {
             self.bond_price_t_raw(r_t, t, bond_maturity), //underlying
             strike,
             self.bond_price_t_raw(r_t, t, option_maturity), //discount
-            self.t_forward_bond_vol(t, option_maturity, bond_maturity)?, //volatility with maturity
+            self.t_forward_bond_vol(t, option_maturity, bond_maturity)?, //volatility of the deliverable bond
         );
         validation::finish("bond_call_t", price)
     }
@@ -93,7 +93,7 @@ impl<'a> HullWhite<'a> {
             self.bond_price_now_raw(bond_maturity), //underlying
             strike,
             self.bond_price_now_raw(option_maturity), //discount
-            self.t_forward_bond_vol(t, option_maturity, bond_maturity)?, //volatility with maturity
+            self.t_forward_bond_vol(t, option_maturity, bond_maturity)?, //volatility of the deliverable bond
         );
         validation::finish("bond_call_now", price)
     }
@@ -249,7 +249,7 @@ impl<'a> HullWhite<'a> {
             self.bond_price_t_raw(r_t, t, bond_maturity), //underlying
             strike,
             self.bond_price_t_raw(r_t, t, option_maturity), //discount
-            self.t_forward_bond_vol(t, option_maturity, bond_maturity)?, //volatility with maturity
+            self.t_forward_bond_vol(t, option_maturity, bond_maturity)?, //volatility of the deliverable bond
         );
         validation::finish("bond_put_t", price)
     }
@@ -288,7 +288,7 @@ impl<'a> HullWhite<'a> {
             self.bond_price_now_raw(bond_maturity), //underlying
             strike,
             self.bond_price_now_raw(option_maturity), //discount
-            self.t_forward_bond_vol(t, option_maturity, bond_maturity)?, //volatility with maturity
+            self.t_forward_bond_vol(t, option_maturity, bond_maturity)?, //volatility of the deliverable bond
         );
         validation::finish("bond_put_now", price)
     }
