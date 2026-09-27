@@ -1,6 +1,19 @@
 name: bench
 
-on: [push]
+# This workflow force-pushes benchmark results to the `gh-pages` branch (the trend
+# chart at https://danielhstahl.github.io/hull_white_rust/dev/bench/), so it runs
+# on pushes to the default branch only -- see the job-level `if:` below, which is
+# the authoritative gate.  Before that restriction this workflow ran on *every*
+# push, including feature branches, with `contents: write`: unreviewed code was
+# allowed to rewrite a shared published branch, and an accidentally-slow branch
+# became part of the published trend.
+#
+# `workflow_dispatch` keeps it runnable on demand (e.g. to rebuild the chart), and
+# the same job-level gate applies to the dispatched ref.
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
 
 permissions:
   # deployments permission to deploy GitHub pages website
@@ -11,17 +24,28 @@ permissions:
 jobs:
   bench:
     runs-on: ubuntu-latest
+    # Hard gate, independent of the `branches:` filter above: only the branch that
+    # is *currently* the repository default may push to gh-pages.  Reads the
+    # default branch from the event payload rather than hardcoding `master`, so a
+    # rename does not silently disable the trend.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     steps:
-      - uses: actions/checkout@v2
-      - uses: hecrj/setup-rust-action@master
+      # Third-party actions are pinned to a full commit SHA (version in the
+      # trailing comment).  `@v2`, and especially `@master`, are floating refs:
+      # whoever moves them changes this workflow without a PR here.
+      #   actions/checkout                          11d5960  v4.4.0
+      #   hecrj/setup-rust-action                   110f367  v2.0.1
+      #   benchmark-action/github-action-benchmark  fd31771  v1.9.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: hecrj/setup-rust-action@110f36749599534ca96628b82f52ae67e5d95a3c # v2.0.1
         with:
           rust-version: nightly
 
       - name: benchmark
-        run: cargo bench | tee output.txt
+        run: cargo bench --features test-support | tee output.txt
 
       - name: Store benchmark result
-        uses: rhysd/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c # v1.9.0
         with:
           tool: "cargo"
           output-file-path: output.txt

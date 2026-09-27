@@ -1,6 +1,6 @@
 [package]
 name = "hull_white"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["Daniel Stahl <danstahl1138@gmail.com>"]
 homepage = "https://github.com/danielhstahl/hull_white_rust"
 repository = "https://github.com/danielhstahl/hull_white_rust"
@@ -8,15 +8,182 @@ readme = "README.md"
 license = "MIT"
 description = "Pricing functions assuming a Hull White short rate"
 edition = "2024"
+# Minimum supported Rust version.  It is the edition floor, not a claim about the code: nothing here
+# needs a newer compiler than the one `edition = "2024"` requires, and CI builds on `stable` and
+# `nightly` (see .github/workflows/test.yml).  Raise this only when something in the crate actually
+# starts requiring more, and say so in CHANGELOG.md.
+rust-version = "1.85"
+# crates.io taxonomy.  `categories` are the display names from <https://crates.io/categories> (a
+# wrong id is rejected at publish time, not at `cargo build`), and `keywords` are the free-text
+# search terms people actually type — "hull-white" is the name of the model and the main reason a
+# stranger lands on this crate.
+keywords = ["hull-white", "interest-rates", "finance", "options", "pricing"]
+categories = ["finance", "mathematics", "science"]
+# The model documentation under `documentation/` is R Sweave / LaTeX source and its rendered PDF.
+# It is 188 KiB — most of the shipped tarball — and nothing on the Rust side reads it: API docs
+# come from `cargo doc`/docs.rs and the model write-up is read on GitHub.  Keeping it out of the
+# published crate buys that back with no cost to consumers; the README still points at the
+# directory in the repository.
+exclude = [
+  "documentation/*.pdf",
+  "documentation/*.tex",
+  "documentation/*.rnw",
+  "documentation/*.aux",
+  "documentation/*.log",
+]
+
+[features]
+# Heavy Monte-Carlo tests (`src/mc.rs` and the MC checks in `src/rates/tests.rs`).
+#
+# Off by default so plain `cargo test` stays a fraction of a second on the Monte-Carlo path: the
+# sample size and the Euler resolution come from `mc::scale()`, which is tiered on this feature.
+# With it on, each check runs ~20x the antithetic pairs on a 4x finer grid, which tightens the
+# `k * standard_error + discretisation residual` band from ~1e-4 to a few times 1e-5 and moves
+# the discretisation residual from "noise-dominated bound" to "measured".  CI runs both tiers
+# (see .github/workflows/test.yml); `--all-features` under coverage gets the heavy one for free.
+#
+#     cargo test                       # quick tier
+#     cargo test --features slow        # heavy tier
+#     cargo test --features slow -- --nocapture   # per-run error-budget report on stdout
+slow = []
+
+# Shared, internally-consistent curve fixtures (`hull_white::test_support`).
+#
+# Off by default and `#[doc(hidden)]`: this is not part of the crate's public surface.  Unit tests
+# get the module through `cfg(test)`; `benches/` is a separate crate and cannot see `cfg(test)`, so
+# the bench command turns this on explicitly -- `cargo bench --features test-support` (cargo does
+# not infer it).  That is the exact command the bench jobs run, in
+# .github/workflows/benchmark_ghpages.yml and the `bench` job of .github/workflows/test.yml,
+# under nightly because the benches are libtest `#[bench]` functions (`#![feature(test)]`).
+# It builds the benches off the same fixture the tests use instead of a copy of it.
+test-support = []
 
 [dependencies]
-nrfind = "1.0.3"
-black_scholes = "0.11.0"
+black_scholes = "0.11.1"
 binomial_tree = "0.5.0"
 
 [dev-dependencies]
-approx = "0.2.0"
-rand = "0.5"
+approx = "0.5.1"
+# `rand` alone gives the RNGs; the normal draws come from `rand_distr` (see `src/mc.rs`).
+rand = "0.9"
+rand_distr = "0.5"
+# A/B harness (`src/solver_ab.rs`) still needs the solver this crate replaced.
+nrfind = "1.0.3"
+
+# Every `pub` item reachable from the crate root has to carry a doc comment, at compile time rather
+# than in review.  `pub(crate)` items are exempt (they are not the API), which is why the kernel
+# functions and the module plumbing stay quiet while `HullWhite`'s methods may not.
+#
+# Declared here rather than as a `#![deny(missing_docs)]` in `src/lib.rs` so the policy covers every
+# target cargo builds through this manifest — lib, doctests, benches — instead of only the one
+# file that happens to carry the attribute.
+[lints.rust]
+missing_docs = "deny"
+
+# Clippy policy, declared next to `[lints.rust]` for the same reason: the manifest reaches every
+# target cargo builds through it — lib, tests, benches — where an attribute in `src/lib.rs`
+# reaches only the file that carries it.
+#
+# The posture is *pedantic, minus a written list of exceptions*.  `pedantic` is enabled as a
+# warning at low priority and both lint jobs run `clippy -- -D warnings`
+# (see `.github/workflows/lint.yml`), so everything in the group is blocking.  What the crate
+# does not satisfy is `allow`ed lint-by-lint below rather than by muting the group: the
+# exceptions stay countable in one place, and when a clippy upgrade adds a new pedantic lint it
+# arrives as a warning to adjudicate instead of as free compliance.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+# --- Kept at zero.  Same level the group already gives them; written out so the enforced set is
+# greppable, and so a lint that some future clippy moves out of `pedantic` does not quietly stop
+# being checked.  All of these were cleaned up across the crate, see CHANGELOG.
+#
+#   match_bool                        `if`/`else`, not `match b { true => .., false => .. }`
+#   if_not_else                       positive branch first
+#   explicit_iter_loop                `for x in &xs`, not `for x in xs.iter()`
+#   uninlined_format_args             `"{x}"`, not `"{x}", x`
+#   map_unwrap_or                     `opt.map_or(default, f)`, one adapter not two
+#   range_plus_one                    `(1..=n)`, not `1..(n + 1)`
+#   manual_let_else                   `let Some(x) = o else { return .. };`
+#   manual_assert_eq                  `assert_eq!(a, b)`, not `assert!(a == b)`
+#   semicolon_if_nothing_returned     a unit-returning last statement gets its `;`
+#   should_panic_without_expect       a panic test names the message it expects
+#   redundant_closure_for_method_calls  `.map(str::trim)`, not `.map(|s| s.trim())`
+#   items_after_statements            types and consts declared before the code that runs
+#   doc_markdown                      backticks on identifiers inside doc comments
+match_bool = "warn"
+if_not_else = "warn"
+explicit_iter_loop = "warn"
+uninlined_format_args = "warn"
+map_unwrap_or = "warn"
+range_plus_one = "warn"
+manual_let_else = "warn"
+manual_assert_eq = "warn"
+semicolon_if_nothing_returned = "warn"
+should_panic_without_expect = "warn"
+redundant_closure_for_method_calls = "warn"
+items_after_statements = "warn"
+doc_markdown = "warn"
+
+# --- Allowed, on purpose.  Each of these fires on this code; the text is the policy, so the
+# next person who meets one knows whether it was decided or overlooked. ---
+#
+# Casting.  `usize` payment counts and step indices become `f64` times, `f64` accumulators
+# become counters, and the ranges are bounded by the instrument (a tenor in quarters, an
+# iteration cap) rather than by the type.  `f64::from(n)` is exact where `n as f64` is only
+# exact-in-practice, but on numbers this crate puts in it there is no difference, and a
+# truncation/sign-loss warning on a deliberately narrowed count reads as a bug report when it
+# is the design.
+cast_precision_loss = "allow"
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+#
+# Exact float comparison.  Anything that must *tolerate* error goes through
+# `approx::assert_abs_diff_eq!` with an explicit epsilon; what is left compares exactly
+# representable values, zeroes and sentinels, where a tolerance would be the smaller lie.
+float_cmp = "allow"
+#
+# A `# Errors` section on every `Result`-returning function.  A few have one, where the
+# contract is subtle; making it universal is a boilerplate block on ~110 methods, and the lint
+# cannot check that the prose says anything true anyway.  The error type itself is documented
+# at `crate::error::HullWhiteError`.
+missing_errors_doc = "allow"
+#
+# `#[must_use]` on public candidates.  Almost the whole public surface returns `Result`, which
+# cannot be silently discarded already; the bare getters and constructors this lint leaves are
+# cheap values whose discard is obvious at the call site.
+must_use_candidate = "allow"
+#
+# Functions longer than the 100-line pedantic default.  They are solver loops, report writers
+# and the tree engine: cohesive runs whose split is a structural change, not a style fix.
+too_many_lines = "allow"
+#
+# Long numeric literals.  The golden values and epsilons in the tests are transcribed verbatim
+# from test output and the model report; grouping digits with underscores or switching to
+# exponent form breaks that copy-paste round trip and makes a mistyped digit harder to spot
+# against the source number.
+unreadable_literal = "allow"
+#
+# Named lifetimes on the borrowed-curve impls.  `impl<'a> HullWhite<'a>` says the struct is
+# parameterised over the caller's curve borrow; `impl HullWhite<'_>` elides exactly the name
+# that carries that meaning.
+elidable_lifetime_names = "allow"
+#
+# `0.5 * (a + b)` kept over `f64::midpoint`.  In the bisection and the antithetic-pair
+# averaging it is the formula as written in the model notes, and `midpoint`'s overflow
+# handling is not a case these values reach.
+manual_midpoint = "allow"
+#
+# Short math names.  `a`, `b`, `sd`, `v2`/`v3` are the model's own symbols and the solver
+# variants' names; renaming to satisfy the similarity heuristic would lose the mapping.
+similar_names = "allow"
+many_single_char_names = "allow"
+#
+# Report building.  `push_str(&format!(..))` and a `format!` inside a `collect` are the
+# readable shape for the MC budget report and the release-surface dump; `write!` into a buffer
+# or a hand-rolled iterator obscures what is being printed to buy back a lint.
+format_push_string = "allow"
+format_collect = "allow"
 
 [profile.bench]
 lto = true
